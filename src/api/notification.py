@@ -1,6 +1,6 @@
 import requests
 import logging
-from src.config import Config
+from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -8,7 +8,7 @@ class AlertManager:
     @staticmethod
     def send_feishu(message: str):
         """Send alert to Feishu"""
-        webhook = Config.FEISHU_WEBHOOK
+        webhook = Settings.FEISHU_WEBHOOK
         if not webhook:
             return
 
@@ -30,7 +30,7 @@ class AlertManager:
     @staticmethod
     def send_dingtalk(message: str):
         """Send alert to DingTalk"""
-        webhook = Config.DINGTALK_WEBHOOK
+        webhook = Settings.DINGTALK_WEBHOOK
         if not webhook:
             return
 

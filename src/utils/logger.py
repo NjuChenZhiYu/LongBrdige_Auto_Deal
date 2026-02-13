@@ -27,8 +27,14 @@ def setup_logger(name: str, log_file: str = "monitor.log", level=logging.INFO):
     if log_dir and not os.path.exists(log_dir):
         os.makedirs(log_dir)
         
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    try:
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except Exception as e:
+        print(f"Failed to setup file logging: {e}")
     
     return logger
+
+# Create a default global logger
+logger = setup_logger("LongBridgeMonitor")
