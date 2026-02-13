@@ -35,12 +35,23 @@ LongBridge_Auto_Deal/
 pip install -r requirements.txt
 ```
 
-### 2. 配置
-复制模板并配置环境变量：
-```bash
-cp .env.example .env
-# 编辑 .env 填入 LongBridge API Key 及 Webhook 地址
-```
+### 2. 配置 (安全重要)
+本项目严格遵循安全规范，敏感信息不直接提交到 Git。请按以下步骤配置：
+
+1.  复制配置模板：
+    ```bash
+    # 推荐方式：在 config 目录下创建 .env
+    cp config/.env.example config/.env
+    ```
+
+2.  编辑 `config/.env` 填入您的 LongBridge Token 和 Webhook 地址。
+
+    > **安全提示**：
+    > *   `config/.env` 文件已被 `.gitignore` 忽略，**绝不会**被提交到远程仓库。
+    > *   请确保服务器上的 `config/.env` 文件权限设置为 600 (仅所有者可读写)：
+    >     ```bash
+    >     chmod 600 config/.env
+    >     ```
 
 ### 3. 运行
 ```bash

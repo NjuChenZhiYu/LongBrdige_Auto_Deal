@@ -2,17 +2,26 @@ import os
 
 try:
     from dotenv import load_dotenv
-    # Load environment variables from .env file
-    load_dotenv()
+    # Load environment variables from config/.env file
+    # Priority: config/.env > .env > system env
+    
+    # 1. Try loading from config/.env
+    config_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", ".env")
+    if os.path.exists(config_env_path):
+        load_dotenv(config_env_path)
+    else:
+        # 2. Fallback to default .env
+        load_dotenv()
 except ImportError:
     # If python-dotenv is not installed, assume environment variables are set manually
     pass
 
 class Config:
     # LongBridge API
-    LB_APP_KEY = os.getenv("LB_APP_KEY")
-    LB_APP_SECRET = os.getenv("LB_APP_SECRET")
-    LB_ACCESS_TOKEN = os.getenv("LB_ACCESS_TOKEN")
+    # Support both new LONGPORT_ prefix (recommended) and old LB_ prefix
+    LB_APP_KEY = os.getenv("LONGPORT_APP_KEY") or os.getenv("LB_APP_KEY")
+    LB_APP_SECRET = os.getenv("LONGPORT_APP_SECRET") or os.getenv("LB_APP_SECRET")
+    LB_ACCESS_TOKEN = os.getenv("LONGPORT_ACCESS_TOKEN") or os.getenv("LB_ACCESS_TOKEN")
 
     # Alert Webhooks
     FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
