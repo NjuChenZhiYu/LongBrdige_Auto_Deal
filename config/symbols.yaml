@@ -1,0 +1,12 @@
+# 监控标的配置
+# 可以在这里配置具体的标的列表，优先级低于环境变量 MONITOR_SYMBOLS
+symbols:
+  - AAPL.US
+  - NVDA.US
+  - TSLA.US
+
+# 针对特定标的的自定义阈值（预留功能）
+custom_thresholds:
+  AAPL.US:
+    price_change: 1.5
+    spread: 0.03

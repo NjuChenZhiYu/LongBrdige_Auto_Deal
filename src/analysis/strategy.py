@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from src.config import Config
+from config.settings import Settings
 from longport.quote import Quote
 import logging
 
@@ -14,30 +14,33 @@ class StrategySignal:
     timestamp: datetime
     details: str
 
-class StrategyAnalyzer:
+class Strategy:
     def __init__(self):
-        self.price_threshold = Config.PRICE_CHANGE_THRESHOLD
-        self.spread_threshold = Config.SPREAD_THRESHOLD
+        self.price_threshold = Settings.PRICE_CHANGE_THRESHOLD
+        self.spread_threshold = Settings.SPREAD_THRESHOLD
         
     def analyze(self, quote: Quote) -> list[StrategySignal]:
         signals = []
         
         # Ensure we have necessary data
-        if not quote.last_done or not quote.prev_close:
+        # Note: Depending on SDK version, quote might handle attributes differently.
+        # Assuming quote object has standard attributes or dictionary access.
+        try:
+            last_done = float(getattr(quote, 'last_done', 0) or 0)
+            prev_close = float(getattr(quote, 'prev_close', 0) or 0)
+        except Exception:
+            # If quote is a dict or other format
+            return signals
+
+        if last_done <= 0 or prev_close <= 0:
             return signals
 
         try:
             # 1. Price Fluctuation Analysis
-            last_done = float(quote.last_done)
-            prev_close = float(quote.prev_close)
-            
-            if prev_close == 0:
-                return signals
-
             change_rate = ((last_done - prev_close) / prev_close) * 100
             if abs(change_rate) >= self.price_threshold:
                 signal = StrategySignal(
-                    symbol=quote.symbol,
+                    symbol=getattr(quote, 'symbol', 'UNKNOWN'),
                     signal_type="PRICE_FLUCTUATION",
                     price=last_done,
                     timestamp=datetime.now(),
@@ -46,14 +49,17 @@ class StrategyAnalyzer:
                 signals.append(signal)
 
             # 2. Spread Analysis (if bid/ask available)
-            if quote.bid_price and quote.ask_price and len(quote.bid_price) > 0 and len(quote.ask_price) > 0:
-                best_bid = float(quote.bid_price[0])
-                best_ask = float(quote.ask_price[0])
+            bid_price = getattr(quote, 'bid_price', [])
+            ask_price = getattr(quote, 'ask_price', [])
+            
+            if bid_price and ask_price and len(bid_price) > 0 and len(ask_price) > 0:
+                best_bid = float(bid_price[0])
+                best_ask = float(ask_price[0])
                 spread = best_ask - best_bid
                 
                 if 0 < spread <= self.spread_threshold:
                     signal = StrategySignal(
-                        symbol=quote.symbol,
+                        symbol=getattr(quote, 'symbol', 'UNKNOWN'),
                         signal_type="SPREAD_NARROW",
                         price=last_done,
                         timestamp=datetime.now(),
@@ -61,6 +67,9 @@ class StrategyAnalyzer:
                     )
                     signals.append(signal)
         except Exception as e:
-            logger.error(f"Error analyzing quote for {quote.symbol}: {e}")
+            logger.error(f"Error analyzing quote for {getattr(quote, 'symbol', 'UNKNOWN')}: {e}")
 
         return signals
+
+# Alias for backward compatibility
+StrategyAnalyzer = Strategy

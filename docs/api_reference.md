@@ -34,3 +34,13 @@
 ### 3. `src.api.trade.TradeManager`
 交易管理器，封装下单逻辑。
 *   `submit_order(symbol, side, price, quantity)`: 提交限价单。
+
+### 4. `src.api.longport.personalized.watchlist`
+用户自选股管理模块。
+*   `get_watchlist() -> list[dict]`: 获取用户自选股列表。
+    *   返回结构: `[{"symbol": "US.AAPL", "name": "Apple Inc.", "watchlist_name": "My Watchlist"}]`
+
+### 5. `src.api.longport.pull.quote`
+行情拉取模块。
+*   `get_quote(symbols: list[str]) -> dict`: 获取指定标的的实时报价。
+    *   返回结构: `{"symbol": {"name": "...", "last_price": 100.0, "change_rate": 0.01, ...}}`

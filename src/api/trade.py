@@ -1,6 +1,6 @@
 from longport.openapi import TradeContext, Config as LongPortConfig
-from longport.openapi import OrderSide, OrderType, TimeInForce
-from src.config import Config
+from longport.openapi import OrderSide, OrderType, TimeInForceType
+from config.settings import Settings
 import logging
 from decimal import Decimal
 
@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class TradeManager:
     def __init__(self):
-        self.enabled = Config.ENABLE_TRADING
+        self.enabled = Settings.ENABLE_TRADING
         self.ctx = None
         if self.enabled:
             self._init_context()
@@ -16,9 +16,9 @@ class TradeManager:
     def _init_context(self):
         try:
             lp_config = LongPortConfig(
-                app_key=Config.LB_APP_KEY,
-                app_secret=Config.LB_APP_SECRET,
-                access_token=Config.LB_ACCESS_TOKEN
+                app_key=Settings.LB_APP_KEY,
+                app_secret=Settings.LB_APP_SECRET,
+                access_token=Settings.LB_ACCESS_TOKEN
             )
             self.ctx = TradeContext(lp_config)
             logger.info("TradeContext initialized successfully")
@@ -49,7 +49,7 @@ class TradeManager:
                 side=order_side,
                 submitted_price=Decimal(str(price)),
                 submitted_quantity=int(quantity),
-                time_in_force=TimeInForce.Day
+                time_in_force=TimeInForceType.Day
             )
             
             logger.info(f"Order submitted successfully: {resp}")
