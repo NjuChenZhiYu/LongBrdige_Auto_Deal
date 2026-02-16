@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from config.settings import Settings
-from longport.quote import Quote
+from longport.openapi import SecurityQuote
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class Strategy:
         self.price_threshold = Settings.PRICE_CHANGE_THRESHOLD
         self.spread_threshold = Settings.SPREAD_THRESHOLD
         
-    def analyze(self, quote: Quote) -> list[StrategySignal]:
+    def analyze(self, quote: SecurityQuote) -> list[StrategySignal]:
         signals = []
         
         # Ensure we have necessary data

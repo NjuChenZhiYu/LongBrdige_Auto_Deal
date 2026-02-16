@@ -1,3 +1,3 @@
-from .core import MonitorSystem
+from .core import Monitor
 
-__all__ = ['MonitorSystem']
+__all__ = ['Monitor']

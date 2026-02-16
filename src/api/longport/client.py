@@ -47,5 +47,15 @@ class LongPortClient:
                 raise
         return self._trade_ctx
 
+    async def reset_context(self):
+        """Reset contexts (e.g. for reconnection)"""
+        if self._quote_ctx:
+            # Try to close/exit if possible?
+            # self._quote_ctx.exit() # If available
+            self._quote_ctx = None
+        if self._trade_ctx:
+            self._trade_ctx = None
+        logger.info("LongPort contexts reset")
+
 # Global client instance
 longport_client = LongPortClient()

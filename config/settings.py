@@ -31,6 +31,16 @@ class Settings:
     # Alert Webhooks
     FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
     DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK")
+    DINGTALK_SECRET = os.getenv("DINGTALK_SECRET")
+    DINGTALK_ALERT_ENABLE = os.getenv("DINGTALK_ALERT_ENABLE", "true").lower() == "true"
+    try:
+        DINGTALK_RETRY_TIMES = int(os.getenv("DINGTALK_RETRY_TIMES", "3"))
+    except ValueError:
+        DINGTALK_RETRY_TIMES = 3
+    try:
+        DINGTALK_RETRY_INTERVAL = int(os.getenv("DINGTALK_RETRY_INTERVAL", "1"))
+    except ValueError:
+        DINGTALK_RETRY_INTERVAL = 1
 
     # Monitoring
     _symbols_str = os.getenv("MONITOR_SYMBOLS", "")
