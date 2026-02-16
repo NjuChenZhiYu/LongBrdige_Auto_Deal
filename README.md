@@ -30,8 +30,15 @@ LongBridge_Auto_Deal/
 ## 快速开始
 
 ### 1. 环境准备
-确保 Python 3.8+ 环境，并安装依赖：
+确保 Python 3.8+ 环境。建议使用虚拟环境：
 ```bash
+# 创建虚拟环境
+python3 -m venv venv
+
+# 激活虚拟环境 (Linux/macOS)
+source venv/bin/activate
+
+# 安装依赖
 pip install -r requirements.txt
 ```
 
@@ -59,6 +66,24 @@ python main.py
 ```
 
 更多部署细节请参考 [docs/deploy.md](docs/deploy.md)。
+
+## 实时监控服务 (Watchlist Monitor)
+
+本项目包含一个基于自选股的 7x24 小时实时监控服务，支持配置热更新、断线重连和多渠道告警。
+
+### 启动服务
+```bash
+python -m src.monitor.watchlist_monitor
+```
+
+### 功能特性
+- **自选股自动同步**：自动拉取长桥 App 自选股列表并订阅行情。
+- **配置热更新**：修改 `config/symbols.yaml` 或自选股列表后，服务自动刷新，无需重启。
+- **智能告警**：支持价格涨跌幅和买卖价差阈值告警，并在交易日内自动去重。
+- **高可用**：支持断线自动重连（指数退避策略）。
+
+### 部署为系统服务
+请参考 [docs/deploy.md](docs/deploy.md) 配置 systemd 服务。
 
 ## 测试
 运行单元测试确保功能正常：

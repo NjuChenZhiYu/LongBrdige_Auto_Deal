@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>美股监控配置</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        h1, h2 { color: #333; }
+        .card { border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="number"], input[type="text"] { padding: 8px; width: 100%; box-sizing: border-box; }
+        button { padding: 8px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        button.danger { background-color: #dc3545; }
+        button.danger:hover { background-color: #bd2130; }
+        ul { list-style-type: none; padding: 0; }
+        li { padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .hint { color: #666; font-size: 0.9em; margin-top: 5px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; }
+        .up { color: green; }
+        .down { color: red; }
+        .badge { display: inline-block; padding: 3px 6px; border-radius: 4px; font-size: 0.8em; margin-right: 5px; }
+        .badge-config { background-color: #e2e3e5; color: #383d41; }
+        .badge-watchlist { background-color: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>美股自动交易监控系统 - 配置中心</h1>
+    
+    <!-- Threshold Config Form -->
+    <div class="card">
+        <h2>监控阈值配置</h2>
+        <form action="/update_thresholds" method="POST">
+            <div class="form-group">
+                <label for="price_change">价格波动阈值 (%)</label>
+                <input type="number" step="0.1" id="price_change" name="price_change" value="{{ thresholds.get('price_change', 1.0) }}" required>
+                <div class="hint">当股价涨跌幅超过此值时触发告警。</div>
+            </div>
+            <!-- Spread threshold removed as per request -->
+            <button type="submit">保存阈值配置</button>
+        </form>
+        
+        <hr>
+        
+        <h2>手动触发检查</h2>
+        <form action="/trigger_check" method="POST">
+            <p>点击下方按钮，将立即获取当前行情并按上述阈值进行检查。如有符合条件的股票，将发送钉钉告警（即使今日已发送过）。</p>
+            <button type="submit" class="warning-btn" style="background-color: #ff9800;">立即检查并推送预警</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>实时监控列表</h2>
+        <div class="hint">包含 LongPort App 自选股及此处配置的标的</div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>代码</th>
+                    <th>名称</th>
+                    <th>最新价 (USD)</th>
+                    <th>涨跌幅</th>
+                    <th>来源</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in market_data %}
+                <tr>
+                    <td>{{ item.symbol }}</td>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.price }}</td>
+                    <td class="{{ 'up' if item.change_rate > 0 else 'down' }}">
+                        {{ "%.2f"|format(item.change_rate) }}%
+                    </td>
+                    <td>
+                        {% if item.is_config %}<span class="badge badge-config">本地配置</span>{% endif %}
+                        {% if item.is_watchlist %}<span class="badge badge-watchlist">LongPort自选</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if item.is_config %}
+                        <form action="/remove_symbol" method="POST" style="display: inline;">
+                            <input type="hidden" name="symbol" value="{{ item.symbol }}">
+                            <button type="submit" class="danger" style="padding: 4px 8px; font-size: 0.8em;">移除配置</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" style="text-align: center;">暂无监控标的</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h3 style="margin-top: 20px;">添加本地监控</h3>
+        <form action="/add_symbol" method="POST" style="display: flex; gap: 10px;">
+            <input type="text" name="symbol" placeholder="输入股票代码 (如 AAPL.US)" required>
+            <button type="submit">添加</button>
+        </form>
+    </div>
+</body>
+</html>
