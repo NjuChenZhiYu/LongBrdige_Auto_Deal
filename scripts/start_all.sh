@@ -33,5 +33,11 @@ echo "Web Interface started with PID: $WEB_PID (Log: logs/web.log)"
 echo "$MONITOR_PID" > logs/monitor.pid
 echo "$WEB_PID" > logs/web.pid
 
+# Try to get the server's IP address
+SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [ -z "$SERVER_IP" ]; then
+    SERVER_IP="<your_server_ip>"
+fi
+
 echo "All services started successfully!"
-echo "Web Interface available at: http://127.0.0.1:5001"
+echo "Web Interface available at: http://$SERVER_IP:5001"
