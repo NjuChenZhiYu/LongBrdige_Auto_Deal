@@ -54,8 +54,9 @@ async def subscribe_watchlist_quote(ctx: QuoteContext, is_first_push: bool = Tru
         try:
              # We pass is_first_push=True (or whatever is passed), adapter strips it if needed
              await ctx.subscribe(all_symbols, [SubType.Quote], is_first_push=is_first_push)
-        except TypeError as e:
-             logger.warning(f"Subscribe with is_first_push failed ({e}). Retrying without it.")
+        except TypeError:
+             # Fallback for older/newer SDK versions that don't support is_first_push
+             logger.warning("Subscribe method doesn't support is_first_push, retrying without it.")
              await ctx.subscribe(all_symbols, [SubType.Quote])
         
         logger.info("Subscription request sent successfully")
