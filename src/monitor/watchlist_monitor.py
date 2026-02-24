@@ -95,6 +95,7 @@ class WatchlistMonitor:
                         logger.warning(f"Unsubscribe failed (might be connection issue): {e}")
                 
                 if self.ctx:
+                    # is_first_push is not supported in 3.0.18
                     self.subscribed_symbols = await subscribe_watchlist_quote(self.ctx, is_first_push=True)
             else:
                 logger.info("No changes in monitored symbols.")

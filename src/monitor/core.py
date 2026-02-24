@@ -21,7 +21,8 @@ class Monitor:
             
             # Subscribe to quotes
             # Note: SubType.Quote is standard for basic price updates
-            await self.ctx.subscribe(Settings.MONITOR_SYMBOLS, [SubType.Quote], is_first_push=True)
+            # is_first_push is not supported in 3.0.18
+            await self.ctx.subscribe(Settings.MONITOR_SYMBOLS, [SubType.Quote])
             logger.info("Subscribed to quotes successfully.")
             
         except Exception as e:
