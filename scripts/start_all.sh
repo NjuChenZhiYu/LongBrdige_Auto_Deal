@@ -16,21 +16,12 @@ else
 fi
 
 # Find Python executable
-<<<<<<< HEAD
 if [ -f "$VENV_DIR/bin/python3" ]; then
     PYTHON_EXEC="./$VENV_DIR/bin/python3"
 elif [ -f "$VENV_DIR/bin/python" ]; then
     PYTHON_EXEC="./$VENV_DIR/bin/python"
 else
     echo "Error: Python executable not found in $VENV_DIR/bin/"
-=======
-if [ -f "venv/bin/python3" ]; then
-    PYTHON_EXEC="./venv/bin/python3"
-elif [ -f "venv/bin/python" ]; then
-    PYTHON_EXEC="./venv/bin/python"
-else
-    echo "Error: Python executable not found in venv/bin/"
->>>>>>> 7bb1aadcb05ba01c33101dc7140ccbb81efcdbf3
     exit 1
 fi
 echo "Using Python: $PYTHON_EXEC"
