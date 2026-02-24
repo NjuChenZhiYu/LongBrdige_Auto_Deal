@@ -5,19 +5,32 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
-# Check if venv exists
-if [ ! -d "venv" ]; then
-    echo "Error: Virtual environment (venv) not found!"
+# Check for virtual environment (priority: venv_auto_deal > venv)
+if [ -d "venv_auto_deal" ]; then
+    VENV_DIR="venv_auto_deal"
+elif [ -d "venv" ]; then
+    VENV_DIR="venv"
+else
+    echo "Error: Virtual environment not found! (Checked 'venv_auto_deal' and 'venv')"
     exit 1
 fi
 
 # Find Python executable
+<<<<<<< HEAD
+if [ -f "$VENV_DIR/bin/python3" ]; then
+    PYTHON_EXEC="./$VENV_DIR/bin/python3"
+elif [ -f "$VENV_DIR/bin/python" ]; then
+    PYTHON_EXEC="./$VENV_DIR/bin/python"
+else
+    echo "Error: Python executable not found in $VENV_DIR/bin/"
+=======
 if [ -f "venv/bin/python3" ]; then
     PYTHON_EXEC="./venv/bin/python3"
 elif [ -f "venv/bin/python" ]; then
     PYTHON_EXEC="./venv/bin/python"
 else
     echo "Error: Python executable not found in venv/bin/"
+>>>>>>> 7bb1aadcb05ba01c33101dc7140ccbb81efcdbf3
     exit 1
 fi
 echo "Using Python: $PYTHON_EXEC"
