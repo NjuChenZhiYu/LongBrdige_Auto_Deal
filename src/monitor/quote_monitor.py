@@ -52,11 +52,12 @@ async def subscribe_watchlist_quote(ctx: QuoteContext, is_first_push: bool = Tru
         # SubType.Quote for real-time quote
         # Note: LongPort SDK 2.0+ might not support is_first_push in subscribe, checking docs or try/except
         try:
-             await ctx.subscribe(all_symbols, [SubType.Quote], is_first_push=is_first_push)
-        except TypeError:
-             # Fallback for older/newer SDK versions that don't support is_first_push
-             logger.warning("Subscribe method doesn't support is_first_push, retrying without it.")
+             # Try without is_first_push first as it is more likely to be compatible with 3.0.18
              await ctx.subscribe(all_symbols, [SubType.Quote])
+        except TypeError:
+             # Fallback if needed, though adapter should handle it
+             logger.warning("Subscribe method failed, retrying with is_first_push.")
+             await ctx.subscribe(all_symbols, [SubType.Quote], is_first_push=is_first_push)
         
         logger.info("Subscription request sent successfully")
         

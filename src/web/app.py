@@ -1,30 +1,7 @@
 import os
-import sys
 import yaml
 import asyncio
 from flask import Flask, render_template, request, redirect, url_for
-
-# --- Diagnostic Start ---
-try:
-    print(f"DEBUG: Python Executable: {sys.executable}")
-    print(f"DEBUG: sys.path: {sys.path}")
-    import longport
-    print(f"DEBUG: longport imported from: {longport.__file__ if hasattr(longport, '__file__') else 'unknown'}")
-    try:
-        import longport.openapi as openapi_mod
-        print(f"DEBUG: longport.openapi imported. Dir: {dir(openapi_mod)}")
-    except ImportError as e:
-        print(f"DEBUG: Failed to import longport.openapi: {e}")
-except ImportError as e:
-    print(f"DEBUG: Failed to import longport: {e}")
-
-try:
-    import openapi
-    print(f"DEBUG: WARNING: Top-level 'openapi' module found at: {openapi.__file__ if hasattr(openapi, '__file__') else 'unknown'}")
-except ImportError:
-    pass
-# --- Diagnostic End ---
-
 from config.settings import Settings
 from src.api.longport.client import longport_client
 from src.api.longport.personalized.watchlist import get_watchlist
