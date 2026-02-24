@@ -68,7 +68,7 @@ async def get_longport_data(configured_symbols):
         return [{'symbol': s, 'name': s, 'price': 0, 'change_rate': 0} for s in configured_symbols]
 
 @app.route('/')
-def index():
+async def index():
     config = load_config()
     symbols = config.get('symbols', [])
     thresholds = config.get('thresholds', {
@@ -76,7 +76,7 @@ def index():
     })
     
     # Fetch real-time data
-    market_data = asyncio.run(get_longport_data(symbols))
+    market_data = await get_longport_data(symbols)
     
     return render_template('index.html', symbols=symbols, thresholds=thresholds, market_data=market_data)
 

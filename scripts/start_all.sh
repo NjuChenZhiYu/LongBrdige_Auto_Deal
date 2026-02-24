@@ -11,6 +11,17 @@ if [ ! -d "venv" ]; then
     exit 1
 fi
 
+# Find Python executable
+if [ -f "venv/bin/python3" ]; then
+    PYTHON_EXEC="./venv/bin/python3"
+elif [ -f "venv/bin/python" ]; then
+    PYTHON_EXEC="./venv/bin/python"
+else
+    echo "Error: Python executable not found in venv/bin/"
+    exit 1
+fi
+echo "Using Python: $PYTHON_EXEC"
+
 # Ensure logs directory exists
 mkdir -p logs
 
@@ -19,13 +30,13 @@ export PYTHONPATH=$PYTHONPATH:.
 
 # Start Watchlist Monitor Service
 echo "Starting Watchlist Monitor Service..."
-nohup ./venv/bin/python3 -m src.monitor.watchlist_monitor > logs/monitor.log 2>&1 &
+nohup $PYTHON_EXEC -m src.monitor.watchlist_monitor > logs/monitor.log 2>&1 &
 MONITOR_PID=$!
 echo "Monitor Service started with PID: $MONITOR_PID (Log: logs/monitor.log)"
 
 # Start Web Interface
 echo "Starting Web Interface..."
-nohup ./venv/bin/python3 src/web/app.py > logs/web.log 2>&1 &
+nohup $PYTHON_EXEC src/web/app.py > logs/web.log 2>&1 &
 WEB_PID=$!
 echo "Web Interface started with PID: $WEB_PID (Log: logs/web.log)"
 
