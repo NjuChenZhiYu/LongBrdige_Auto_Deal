@@ -97,6 +97,12 @@ class DingTalkAlert:
         webhook = Settings.DINGTALK_WEBHOOK
         secret = Settings.DINGTALK_SECRET
         
+        # Debug: Log masked webhook
+        if webhook and len(webhook) > 20:
+            logger.info(f"Using DingTalk Webhook: {webhook[:20]}... (Length: {len(webhook)})")
+        else:
+            logger.warning(f"DingTalk Webhook might be invalid: {webhook}")
+
         url = webhook
         if secret:
             timestamp, sign = DingTalkAlert._get_sign(secret)

@@ -12,14 +12,20 @@ try:
     config_env_path = os.path.join(config_dir, ".env")
     
     if os.path.exists(config_env_path):
-        load_dotenv(config_env_path)
+        print(f"Loading configuration from: {config_env_path}")
+        load_dotenv(config_env_path, override=True)
     else:
         # 2. Fallback to default .env in root
         root_env_path = os.path.join(os.path.dirname(config_dir), ".env")
-        load_dotenv(root_env_path)
+        if os.path.exists(root_env_path):
+            print(f"Loading configuration from: {root_env_path}")
+            load_dotenv(root_env_path, override=True)
+        else:
+            print("Warning: No .env file found in config/ or root directory.")
+
 except ImportError:
-    # If python-dotenv is not installed, assume environment variables are set manually
-    pass
+    print("Warning: python-dotenv not installed. Relying on system environment variables.")
+
 
 class Settings:
     # LongBridge API
@@ -89,3 +95,12 @@ class Settings:
 
 # Alias for backward compatibility if needed, but prefer Settings
 Config = Settings
+
+# Debug: Print loaded configuration (masked)
+print("-" * 30)
+print("Configuration Loaded:")
+print(f"LONGPORT_APP_KEY: {'*' * 8 if Settings.LONGPORT_APP_KEY else 'None'}")
+print(f"LONGPORT_ACCESS_TOKEN: {'*' * 10 if Settings.LONGPORT_ACCESS_TOKEN else 'None'} (Length: {len(Settings.LONGPORT_ACCESS_TOKEN) if Settings.LONGPORT_ACCESS_TOKEN else 0})")
+print(f"DINGTALK_WEBHOOK: {'*' * 20 if Settings.DINGTALK_WEBHOOK else 'None'}")
+print(f"MONITOR_SYMBOLS: {Settings.MONITOR_SYMBOLS}")
+print("-" * 30)

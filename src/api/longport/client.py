@@ -23,6 +23,22 @@ class LongPortClient:
 
     async def get_quote_context(self):
         """Get or create AsyncQuoteContext singleton"""
+        # Check if existing context is valid for current loop
+        if self._quote_ctx:
+            try:
+                # Check if context's loop matches current running loop
+                # Try to access internal _loop (common in asyncio objects) or loop property
+                ctx_loop = getattr(self._quote_ctx, "_loop", None) or getattr(self._quote_ctx, "loop", None)
+                
+                if ctx_loop:
+                    current_loop = asyncio.get_running_loop()
+                    if ctx_loop.is_closed() or ctx_loop != current_loop:
+                        logger.warning(f"Context loop mismatch (ctx: {id(ctx_loop)}, cur: {id(current_loop)}) or closed. Resetting context.")
+                        self._quote_ctx = None
+            except Exception as e:
+                logger.warning(f"Error checking context loop: {e}. Resetting context.")
+                self._quote_ctx = None
+
         if self._quote_ctx is None:
             try:
                 self._quote_ctx = await AsyncQuoteContext.create(self.config)
