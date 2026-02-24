@@ -61,7 +61,35 @@ pip install -r requirements.txt
     >     ```
 
 ### 3. 运行
+
+#### Windows (推荐)
+使用 PowerShell 脚本一键启动所有服务（无需手动激活虚拟环境）：
+```powershell
+# 启动服务 (监控 + Web)
+./scripts/start_all.ps1
+
+# 停止服务
+./scripts/stop_all.ps1
+```
+
+#### Linux/macOS
 ```bash
+# 启动服务
+./scripts/start_all.sh
+
+# 停止服务
+./scripts/stop_all.sh
+```
+
+#### 手动运行 (开发调试)
+如果您想手动运行单个 Python 文件，需要先激活虚拟环境：
+```bash
+# Windows
+venv\Scripts\activate
+python main.py
+
+# Linux/macOS
+source venv/bin/activate
 python main.py
 ```
 

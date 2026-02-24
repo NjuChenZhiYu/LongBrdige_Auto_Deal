@@ -1,0 +1,13 @@
+[33mcommit 4fead47250f02874d963f65158649eb49d7d42e5[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mdevelop[m[33m, [m[1;31morigin/develop[m[33m)[m
+Author: NjuChenZhiYu <mf1932023@smail.nju.edu.cn>
+Date:   Fri Feb 13 15:30:06 2026 +0800
+
+    feat: implement watchlist & quote modules, migrate to SDK v3 async
+    
+    - Implemented src/api/longport/personalized/watchlist.py: get_watchlist()
+    - Implemented src/api/longport/pull/quote.py: get_quote() with % change_rate
+    - Migrated LongPortClient to use AsyncQuoteContext (SDK v3)
+    - Fixed TimeInForceType in TradeManager
+    - Refactored config to config/settings.py, removed src/config.py
+    - Added PyYAML to requirements.txt
+    - Added example/query_watchlist_quote.py and tests
