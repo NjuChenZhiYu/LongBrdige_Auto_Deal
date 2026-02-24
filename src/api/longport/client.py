@@ -37,6 +37,8 @@ class AsyncContextAdapter:
     async def subscribe(self, symbols, sub_types, is_first_push=False):
         # v3.0.18 sync subscribe does NOT support is_first_push
         # We ignore this parameter to maintain compatibility with older SDK
+        if is_first_push:
+            logger.debug("AsyncContextAdapter: Dropping is_first_push=True for v3 compatibility")
         return await self._run_sync('subscribe', symbols, sub_types)
 
     async def unsubscribe(self, symbols, sub_types):
