@@ -6,5 +6,6 @@ symbols:
 - NVDA.US
 - TSLA.US
 - BILIBILI
+- GOOGLE
 thresholds:
   price_change: 5.0
