@@ -68,7 +68,7 @@ fi
 echo "Installing Python dependencies..."
 ./venv/bin/python3 -m pip install --upgrade pip
 if [ -f "requirements.txt" ]; then
-    ./venv/bin/pip install -r requirements.txt
+    ./venv/bin/python3 -m pip install -r requirements.txt
 else
     echo -e "${RED}Error: requirements.txt not found!${NC}"
     exit 1
