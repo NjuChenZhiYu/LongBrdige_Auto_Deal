@@ -37,6 +37,19 @@ else
     echo -e "${RED}Warning: Package manager not found. Please ensure Python 3.8+ and venv are installed manually.${NC}"
 fi
 
+# Check Python version
+echo "Checking Python version..."
+if command -v python3 &> /dev/null; then
+    python3 -c "import sys; print(f'Current Python version: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}'); exit(0) if sys.version_info >= (3, 8) else exit(1)"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error: Python 3.8 or higher is required.${NC}"
+        exit 1
+    fi
+else
+    echo -e "${RED}Error: Python 3 could not be found.${NC}"
+    exit 1
+fi
+
 # 2. Python Virtual Environment
 echo -e "\n${YELLOW}[2/4] Setting up Python virtual environment...${NC}"
 
@@ -51,12 +64,11 @@ else
     echo "Virtual environment already exists."
 fi
 
-# Activate venv and install requirements
+# Install requirements using venv python directly
 echo "Installing Python dependencies..."
-source venv/bin/activate
-pip install --upgrade pip
+./venv/bin/python3 -m pip install --upgrade pip
 if [ -f "requirements.txt" ]; then
-    pip install -r requirements.txt
+    ./venv/bin/pip install -r requirements.txt
 else
     echo -e "${RED}Error: requirements.txt not found!${NC}"
     exit 1
