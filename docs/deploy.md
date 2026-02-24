@@ -5,17 +5,57 @@
 *   **Python**: 3.8 或更高版本
 *   **网络**: 需能访问长桥 OpenAPI 服务器及飞书/钉钉 API
 
-## 部署步骤
+## 快速开始 (推荐)
+
+### 1. 登录服务器
+使用 SSH 登录您的阿里云服务器：
+```bash
+ssh root@<your_server_ip>
+```
+
+### 2. 一键部署
+我们提供了一个自动化脚本来处理环境安装。请在服务器上执行以下命令：
+
+```bash
+# 1. 克隆代码
+git clone https://github.com/NjuChenZhiYu/LongBrdige_Auto_Deal.git
+cd LongBrdige_Auto_Deal
+
+# 2. 运行初始化脚本 (自动安装 Python, 依赖, 创建 venv)
+bash scripts/setup_server.sh
+```
+
+### 3. 配置敏感信息 (关键)
+部署脚本执行完毕后，您需要手动配置 `.env` 文件：
+
+```bash
+# 复制配置模板
+cp config/.env.example config/.env
+
+# 编辑配置文件 (填入 LB_ACCESS_TOKEN 等)
+vim config/.env
+```
+> 按 `i` 进入编辑模式，修改完成后按 `Esc`，输入 `:wq` 保存并退出。
+
+### 4. 启动服务
+```bash
+./scripts/start_all.sh
+```
+
+---
+
+## 手动部署指南 (详细步骤)
+
+如果您无法使用上述脚本，请参考以下手动步骤。
 
 ### 1. 安装 Python 环境
 如果服务器未安装 Python 3.8+：
 ```bash
-# Ubuntu
-sudo apt update
-sudo apt install python3 python3-pip -y
+# Ubuntu / Debian
+sudo apt update && sudo apt install -y python3 python3-pip python3-venv
 
-# CentOS
-sudo yum install python3 python3-pip -y
+# CentOS / Alibaba Cloud Linux
+sudo yum update -y && sudo yum install -y python3 python3-pip git
 ```
 
 ### 2. 获取代码与安装依赖
