@@ -79,7 +79,9 @@ async def handle_watchlist_quote(symbol: str, quote: Any, threshold_config: Dict
 * **Keywords**: LongBridge, Alert, 美股, 监控, 告警
             """
             # Asynchronous alert sending
-            await DingTalkAlert.send_alert(title, content, symbol, "price_change_rate", force=force_alert)
+            # Differentiate reason by direction (rise/fall) to allow separate alerts for both in one day
+            reason_suffix = "rise" if change_rate > 0 else "fall"
+            await DingTalkAlert.send_alert(title, content, symbol, f"price_change_{reason_suffix}", force=force_alert)
             triggered = True
             alert_data['price_change'] = change_rate
 
