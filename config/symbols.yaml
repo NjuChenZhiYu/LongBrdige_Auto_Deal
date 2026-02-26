@@ -1,9 +1,36 @@
 custom_thresholds:
   AAPL.US:
     price_change: 1.5
-# Default monitored symbols (Optional). 
-# The system automatically monitors all stocks in your LongPort Watchlist.
-# Add symbols here ONLY if you want to monitor stocks NOT in your watchlist.
-symbols: []
+symbols:
+- ABBV.US
+- ABSI.US
+- ABSI270115C3000.US
+- ALM.US
+- AMD.US
+- APP.US
+- ASTS.US
+- AZN.US
+- BILI.US
+- BMY.US
+- DSNKY.US
+- FXP.US
+- GH.US
+- KYCCF.US
+- LEGN.US
+- LEGN261218C17500.US
+- LEGN261218C20000.US
+- LEGN261218C22500.US
+- LEGN270115C20000.US
+- LEGN270115C22500.US
+- MRNA.US
+- NBIS.US
+- NVO.US
+- PFE.US
+- PLTR.US
+- PSQ.US
+- PYPL.US
+- SE.US
+- TTWO.US
+- UNH.US
 thresholds:
   price_change: 5.0
