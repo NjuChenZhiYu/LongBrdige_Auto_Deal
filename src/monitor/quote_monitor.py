@@ -38,6 +38,8 @@ async def subscribe_watchlist_quote(ctx: QuoteContext) -> List[str]:
         # 2. Add monitored symbols from config/env
         config_symbols = Settings.MONITOR_SYMBOLS
         
+        logger.info(f"Watchlist symbols: {len(watchlist_symbols)}, Config symbols: {len(config_symbols)}")
+        
         # Combine and deduplicate
         all_symbols = list(set(watchlist_symbols + config_symbols))
         

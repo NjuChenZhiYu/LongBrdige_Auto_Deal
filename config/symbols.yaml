@@ -1,11 +1,9 @@
 custom_thresholds:
   AAPL.US:
     price_change: 1.5
-symbols:
-- AAPL.US
-- NVDA.US
-- TSLA.US
-- BILIBILI
-- GOOGLE
+# Default monitored symbols (Optional). 
+# The system automatically monitors all stocks in your LongPort Watchlist.
+# Add symbols here ONLY if you want to monitor stocks NOT in your watchlist.
+symbols: []
 thresholds:
   price_change: 5.0
