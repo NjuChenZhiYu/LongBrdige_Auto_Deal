@@ -1,5 +1,5 @@
 $env:PYTHONPATH = "$PSScriptRoot\.."
-$python = "$PSScriptRoot\..\venv\Scripts\python.exe"
+$python = "$PSScriptRoot\..\venv_auto_deal\Scripts\python.exe"
 
 if (-not (Test-Path $python)) {
     Write-Host "Error: Python executable not found at $python" -ForegroundColor Red

@@ -4,8 +4,8 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 Set-Location $ProjectRoot
 
 # Check venv
-if (-not (Test-Path "venv")) {
-    Write-Host "Error: Virtual environment (venv) not found! Please create it first."
+if (-not (Test-Path "venv_auto_deal")) {
+    Write-Host "Error: Virtual environment (venv_auto_deal) not found! Please create it first."
     exit 1
 }
 
@@ -19,12 +19,12 @@ $env:PYTHONPATH = "$ProjectRoot;$env:PYTHONPATH"
 
 # Start Watchlist Monitor Service
 Write-Host "Starting Watchlist Monitor Service..."
-$monitorProcess = Start-Process -FilePath "venv\Scripts\python.exe" -ArgumentList "-m src.monitor.watchlist_monitor" -RedirectStandardOutput "logs\monitor.out.log" -RedirectStandardError "logs\monitor.err.log" -PassThru -WindowStyle Hidden
+$monitorProcess = Start-Process -FilePath "venv_auto_deal\Scripts\python.exe" -ArgumentList "-m src.monitor.watchlist_monitor" -RedirectStandardOutput "logs\monitor.out.log" -RedirectStandardError "logs\monitor.err.log" -PassThru -WindowStyle Hidden
 Write-Host "Monitor Service started with PID: $($monitorProcess.Id)"
 
 # Start Web Interface
 Write-Host "Starting Web Interface..."
-$webProcess = Start-Process -FilePath "venv\Scripts\python.exe" -ArgumentList "src\web\app.py" -RedirectStandardOutput "logs\web.out.log" -RedirectStandardError "logs\web.err.log" -PassThru -WindowStyle Hidden
+$webProcess = Start-Process -FilePath "venv_auto_deal\Scripts\python.exe" -ArgumentList "src\web\app.py" -RedirectStandardOutput "logs\web.out.log" -RedirectStandardError "logs\web.err.log" -PassThru -WindowStyle Hidden
 Write-Host "Web Interface started with PID: $($webProcess.Id)"
 
 # Save PIDs

@@ -24,12 +24,11 @@ async def get_watchlist_symbols() -> List[str]:
         logger.error(f"Error extracting watchlist symbols: {e}")
         return []
 
-async def subscribe_watchlist_quote(ctx: QuoteContext, is_first_push: bool = True) -> List[str]:
+async def subscribe_watchlist_quote(ctx: QuoteContext) -> List[str]:
     """
     Subscribe to watchlist quotes.
     
     :param ctx: Initialized QuoteContext
-    :param is_first_push: Whether to push current quote immediately
     :return: List of subscribed symbols
     """
     try:
@@ -50,14 +49,8 @@ async def subscribe_watchlist_quote(ctx: QuoteContext, is_first_push: bool = Tru
         
         # 3. Subscribe
         # SubType.Quote for real-time quote
-        # The AsyncContextAdapter handles compatibility for v3.0.18 (ignores is_first_push if needed)
-        try:
-             # We pass is_first_push=True (or whatever is passed), adapter strips it if needed
-             await ctx.subscribe(all_symbols, [SubType.Quote], is_first_push=is_first_push)
-        except TypeError:
-             # Fallback for older/newer SDK versions that don't support is_first_push
-             logger.warning("Subscribe method doesn't support is_first_push, retrying without it.")
-             await ctx.subscribe(all_symbols, [SubType.Quote])
+        # Native AsyncQuoteContext in v3.0.22+ does not support is_first_push
+        await ctx.subscribe(all_symbols, [SubType.Quote])
         
         logger.info("Subscription request sent successfully")
         
