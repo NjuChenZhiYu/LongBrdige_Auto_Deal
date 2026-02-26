@@ -27,6 +27,17 @@ class WatchlistMonitor:
             'price_change': Settings.PRICE_CHANGE_THRESHOLD,
             'spread': Settings.SPREAD_THRESHOLD
         }
+        
+        # Load initial config from symbols.yaml immediately
+        if os.path.exists(Settings.SYMBOLS_CONFIG_PATH):
+            try:
+                with open(Settings.SYMBOLS_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                    new_config = yaml.safe_load(f) or {}
+                    if 'thresholds' in new_config:
+                        self.threshold_config.update(new_config['thresholds'])
+                        logger.info(f"Loaded initial thresholds from symbols.yaml: {self.threshold_config}")
+            except Exception as e:
+                logger.error(f"Failed to load initial symbols.yaml: {e}")
 
     def _on_quote(self, symbol: str, event: Any):
         """Callback for quote push"""

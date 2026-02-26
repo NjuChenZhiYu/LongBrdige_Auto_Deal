@@ -85,12 +85,4 @@ async def handle_watchlist_quote(symbol: str, quote: Any, threshold_config: Dict
             triggered = True
             alert_data['price_change'] = change_rate
 
-    # 2. Bid-Ask Spread Check (Removed as per user request)
-    # if bid > 0 and ask > 0:
-    #     spread = (ask - bid) / bid
-    #     spread_threshold = threshold_config.get('spread', Settings.SPREAD_THRESHOLD)
-    #     
-    #     if spread >= spread_threshold:
-    #         ...
-
     return triggered, alert_data
