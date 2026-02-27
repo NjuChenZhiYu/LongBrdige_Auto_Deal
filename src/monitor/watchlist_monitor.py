@@ -27,6 +27,8 @@ class WatchlistMonitor:
             'price_change': Settings.PRICE_CHANGE_THRESHOLD,
             'spread': Settings.SPREAD_THRESHOLD
         }
+        # Cache for prev_close prices
+        self.prev_close_cache: Dict[str, float] = {}
         
         # Load initial config from symbols.yaml immediately
         if os.path.exists(Settings.SYMBOLS_CONFIG_PATH):
@@ -50,10 +52,27 @@ class WatchlistMonitor:
 
     async def _process_quote(self, symbol: str, event: Any):
         try:
+            # Use cached prev_close if available
+            if symbol in self.prev_close_cache:
+                # Create a wrapper with cached prev_close
+                class QuoteWrapper:
+                    def __init__(self, original, prev_close_val):
+                        self._original = original
+                        self.prev_close = prev_close_val
+                        self.last_done = getattr(original, 'last_done', 0)
+                    def __getattr__(self, name):
+                        return getattr(self._original, name)
+                
+                wrapped_event = QuoteWrapper(event, self.prev_close_cache[symbol])
+                logger.debug(f"Using cached prev_close for {symbol}: {self.prev_close_cache[symbol]}")
+            else:
+                wrapped_event = event
+                logger.warning(f"No cached prev_close for {symbol}, using event data")
+            
             # Check if event is valid PushQuote
-            triggered, alert_data = await handle_watchlist_quote(symbol, event, self.threshold_config)
+            triggered, alert_data = await handle_watchlist_quote(symbol, wrapped_event, self.threshold_config)
             if triggered:
-                logger.info(f"Alert triggered for {symbol}: {alert_data}")
+                logger.info(f"🚨 Alert triggered for {symbol}: {alert_data}")
                 await DingTalkAlert.send_alert(
                     f"Price Alert: {symbol}",
                     str(alert_data),
@@ -61,7 +80,7 @@ class WatchlistMonitor:
                     "INFO"
                 )
         except Exception as e:
-            logger.error(f"Error in quote callback for {symbol}: {e}")
+            logger.error(f"Error in quote callback for {symbol}: {e}", exc_info=True)
 
     async def _refresh_config(self):
         """Refresh configuration and watchlist"""
@@ -148,10 +167,25 @@ class WatchlistMonitor:
                 # 3. Subscribe
                 self.subscribed_symbols = await subscribe_watchlist_quote(self.ctx)
                 
+                # 4. Fetch initial quotes to cache prev_close prices
+                logger.info("Fetching initial quotes to cache prev_close prices...")
+                try:
+                    initial_quotes = await self.ctx.quote(self.subscribed_symbols)
+                    for q in initial_quotes:
+                        symbol = q.symbol
+                        if hasattr(q, 'prev_close') and q.prev_close:
+                            self.prev_close_cache[symbol] = float(q.prev_close)
+                            logger.info(f"Cached prev_close for {symbol}: {self.prev_close_cache[symbol]}")
+                        else:
+                            logger.warning(f"No prev_close available for {symbol}")
+                    logger.info(f"Cached prev_close for {len(self.prev_close_cache)} symbols")
+                except Exception as e:
+                    logger.error(f"Failed to fetch initial quotes: {e}")
+                
                 # Reset retry count on success
                 retry_count = 0
                 
-                # 4. Main Loop
+                # 5. Main Loop
                 logger.info("Monitor service running. Press Ctrl+C to stop.")
                 while self.running:
                     await asyncio.sleep(60) # Check every minute
