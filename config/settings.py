@@ -65,14 +65,19 @@ class Settings:
         except Exception as e:
             print(f"Warning: Failed to load symbols.yaml: {e}")
 
-    # Strategy Thresholds
+    # Strategy Thresholds - Priority: symbols.yaml > .env > default
+    # Load from symbols.yaml if available
+    _yaml_thresholds = SYMBOLS_CONFIG.get('thresholds', {})
+    
     try:
-        PRICE_CHANGE_THRESHOLD = float(os.getenv("PRICE_CHANGE_THRESHOLD", "2.0"))
+        PRICE_CHANGE_THRESHOLD = float(_yaml_thresholds.get('price_change', 
+            os.getenv("PRICE_CHANGE_THRESHOLD", "5.0")))
     except ValueError:
-        PRICE_CHANGE_THRESHOLD = 2.0
+        PRICE_CHANGE_THRESHOLD = 5.0
 
     try:
-        SPREAD_THRESHOLD = float(os.getenv("SPREAD_THRESHOLD", "0.05"))
+        SPREAD_THRESHOLD = float(_yaml_thresholds.get('spread', 
+            os.getenv("SPREAD_THRESHOLD", "0.05")))
     except ValueError:
         SPREAD_THRESHOLD = 0.05
 
