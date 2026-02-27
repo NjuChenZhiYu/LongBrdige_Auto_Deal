@@ -73,12 +73,7 @@ class WatchlistMonitor:
             triggered, alert_data = await handle_watchlist_quote(symbol, wrapped_event, self.threshold_config)
             if triggered:
                 logger.info(f"🚨 Alert triggered for {symbol}: {alert_data}")
-                await DingTalkAlert.send_alert(
-                    f"Price Alert: {symbol}",
-                    str(alert_data),
-                    "price_monitor",
-                    "INFO"
-                )
+                # Note: DingTalk alert is already sent by handle_watchlist_quote, no need to send again here
         except Exception as e:
             logger.error(f"Error in quote callback for {symbol}: {e}", exc_info=True)
 
@@ -198,8 +193,10 @@ class WatchlistMonitor:
                         await self._refresh_config()
                         self.last_config_refresh = now
                     
-                    # Daily cache clear at midnight
-                    if now.hour == 0 and now.minute == 0:
+                    # Daily cache clear at 12:30 CST (after US market close ET 00:30)
+                    # US market closes at 16:00 ET = 05:00+1 CST next day
+                    # We clear at 12:30 CST to ensure a full trading day has passed
+                    if now.hour == 12 and now.minute == 30:
                          DingTalkAlert.clear_cache()
                          
             except Exception as e:
