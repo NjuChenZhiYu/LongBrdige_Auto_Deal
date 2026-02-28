@@ -3,8 +3,6 @@ custom_thresholds:
     price_change: 1.5
 symbols:
 - ABBV.US
-- ABSI.US
-- ABSI270115C3000.US
 - ALM.US
 - AMD.US
 - APP.US
@@ -29,6 +27,9 @@ symbols:
 - PLTR.US
 - PSQ.US
 - PYPL.US
+- RXRX.US
+- RXRX261120C3500.US
+- RXRX270115C3500.US
 - SE.US
 - TTWO.US
 - UNH.US

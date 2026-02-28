@@ -193,10 +193,10 @@ class WatchlistMonitor:
                         await self._refresh_config()
                         self.last_config_refresh = now
                     
-                    # Daily cache clear at 12:30 CST (after US market close ET 00:30)
-                    # US market closes at 16:00 ET = 05:00+1 CST next day
-                    # We clear at 12:30 CST to ensure a full trading day has passed
-                    if now.hour == 12 and now.minute == 30:
+                    # Daily cache clear at 05:30 CST (after US market close)
+                    # US market closes at 16:00 ET = 05:00+1 CST (冬令时)
+                    # Clear at 05:30 to ensure US market has fully closed
+                    if now.hour == 5 and now.minute == 30:
                          DingTalkAlert.clear_cache()
                          
             except Exception as e:
