@@ -6,14 +6,14 @@ from src.api.dingtalk import DingTalkAlert
 
 logger = logging.getLogger(__name__)
 
-async def handle_watchlist_quote(symbol: str, quote: Any, threshold_config: Dict, force_alert: bool = False) -> Tuple[bool, Dict]:
+async def handle_watchlist_quote(symbol: str, quote: Any, threshold_config: Dict, send_alert: bool = False) -> Tuple[bool, Dict]:
     """
     Handle watchlist quote push and check thresholds
     
     :param symbol: Stock symbol
     :param quote: Quote object (PushQuote or QuoteSnapshot)
     :param threshold_config: Threshold configuration
-    :param force_alert: If True, force send alert even if duplicate
+    :param send_alert: If True, send alert to DingTalk (otherwise just check threshold)
     :return: (triggered, alert_data)
     """
     try:
@@ -81,7 +81,14 @@ async def handle_watchlist_quote(symbol: str, quote: Any, threshold_config: Dict
             # Asynchronous alert sending
             # Differentiate reason by direction (rise/fall) to allow separate alerts for both in one day
             reason_suffix = "rise" if change_rate > 0 else "fall"
-            await DingTalkAlert.send_alert(title, content, symbol, f"price_change_{reason_suffix}", force=force_alert)
+            
+            # Only send alert if explicitly requested (e.g. scheduled task or manual trigger)
+            if send_alert:
+                await DingTalkAlert.send_alert(title, content, symbol, f"price_change_{reason_suffix}")
+                logger.info(f"DingTalk alert sent for {symbol}: {change_rate:.2f}%")
+            else:
+                logger.info(f"Alert condition met for {symbol} ({change_rate:.2f}%), but sending skipped (send_alert=False)")
+                
             triggered = True
             alert_data['price_change'] = change_rate
 

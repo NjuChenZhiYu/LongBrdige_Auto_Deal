@@ -51,6 +51,13 @@
             <p>点击下方按钮，将立即获取当前行情并按上述阈值进行检查。如有符合条件的股票，将发送钉钉告警（即使今日已发送过）。</p>
             <button type="submit" class="warning-btn" style="background-color: #ff9800;">立即检查并推送预警</button>
         </form>
+        
+        <hr>
+        <h2>同步自选股配置</h2>
+        <p>将 LongPort App 中的自选股列表同步到本地配置文件 (symbols.yaml)。</p>
+        <form action="/sync_watchlist" method="POST">
+            <button type="submit" style="background-color: #2196F3;">从 LongPort 同步自选股</button>
+        </form>
     </div>
 
     <div class="card">
