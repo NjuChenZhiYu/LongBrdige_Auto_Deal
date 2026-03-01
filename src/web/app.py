@@ -74,13 +74,42 @@ def scheduled_job():
     logger.info("Running scheduled alert check...")
     asyncio.run(check_and_alert(send_alert=True))
 
+import threading
+from src.monitor.option_monitor import option_monitor
+from src.services.llm_analyst import llm_analyst
+
+def run_async_loop(coro):
+    """Helper to run a coroutine in a new event loop in a thread"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(coro)
+    loop.run_forever()
+
+def start_option_monitor():
+    """Start option monitor in background thread"""
+    t = threading.Thread(target=run_async_loop, args=(option_monitor.start(),), daemon=True)
+    t.start()
+    logger.info("Option Monitor thread started")
+
+def scheduled_report_job():
+    """Wrapper for scheduled report generation"""
+    logger.info("Running scheduled report generation...")
+    asyncio.run(llm_analyst.generate_report())
+
 # Scheduler Setup
 scheduler = BackgroundScheduler(timezone=CST_TZ)
-# Schedule at 22:50 CST
+# Existing alerts
 scheduler.add_job(scheduled_job, 'cron', hour=22, minute=50)
-# Schedule at 07:50 CST
 scheduler.add_job(scheduled_job, 'cron', hour=7, minute=50)
+
+# LLM Report
+scheduler.add_job(scheduled_report_job, 'cron', hour=22, minute=50)
+scheduler.add_job(scheduled_report_job, 'cron', hour=7, minute=50)
+
 scheduler.start()
+
+# Start Option Monitor
+start_option_monitor()
 
 async def get_longport_data(configured_symbols):
     """Fetch watchlist and quotes from LongPort"""
@@ -130,16 +159,20 @@ async def get_longport_data(configured_symbols):
 
 @app.route('/')
 async def index():
-    config = load_config()
-    symbols = config.get('symbols', [])
-    thresholds = config.get('thresholds', {
-        'price_change': Settings.PRICE_CHANGE_THRESHOLD
-    })
-    
-    # Fetch real-time data
-    market_data = await get_longport_data(symbols)
-    
-    return render_template('index.html', symbols=symbols, thresholds=thresholds, market_data=market_data)
+    try:
+        config = load_config()
+        symbols = config.get('symbols', [])
+        thresholds = config.get('thresholds', {
+            'price_change': Settings.PRICE_CHANGE_THRESHOLD
+        })
+        
+        # Fetch real-time data
+        market_data = await get_longport_data(symbols)
+        
+        return render_template('index.html', symbols=symbols, thresholds=thresholds, market_data=market_data)
+    except Exception as e:
+        logger.error(f"Error in index route: {e}", exc_info=True)
+        return f"Internal Server Error: {e}", 500
 
 from src.api.longport.push.watchlist import handle_watchlist_quote
 
