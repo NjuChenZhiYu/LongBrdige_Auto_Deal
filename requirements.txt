@@ -9,3 +9,5 @@ aiohttp>=3.8.0
 asgiref>=3.7.0
 openai>=1.0.0
 scipy>=1.10.0
+futu-api>=3.0.0
+tinydb>=4.7.0

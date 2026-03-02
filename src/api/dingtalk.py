@@ -24,7 +24,7 @@ class DingTalkAlert:
         string_to_sign = '{}\n{}'.format(timestamp, secret)
         string_to_sign_enc = string_to_sign.encode('utf-8')
         hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
-        sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
+        sign = urllib.parse.quote_plus(base64.b64encode(hmac_code).decode('utf-8'))
         return timestamp, sign
 
     @staticmethod
@@ -46,6 +46,11 @@ class DingTalkAlert:
 
         webhook = Settings.DINGTALK_WEBHOOK
         secret = Settings.DINGTALK_SECRET
+        
+        # Ensure keyword is present for security verification
+        keyword = getattr(Settings, 'DINGTALK_KEYWORD', '告警')
+        if keyword and keyword not in title and keyword not in content:
+            content = f"【{keyword}】\n{content}"
         
         # Debug: Log masked webhook
         if webhook and len(webhook) > 20:

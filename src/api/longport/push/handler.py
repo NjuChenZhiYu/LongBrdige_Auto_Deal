@@ -19,9 +19,11 @@ class PushHandler:
             
             for sig in signals:
                 logger.info(f"Signal triggered: {sig}")
+                market = "HK" if symbol.startswith("HK.") else "US"
                 AlertManager.send_alert(
                     title=f"Strategy Signal: {sig.signal_type} - {sig.symbol}",
-                    content=f"Price: {sig.price}\nTime: {sig.timestamp}\nDetails: {sig.details}"
+                    content=f"Price: {sig.price}\nTime: {sig.timestamp}\nDetails: {sig.details}",
+                    market=market
                 )
         except Exception as e:
             logger.error(f"Error handling quote for {symbol}: {e}")

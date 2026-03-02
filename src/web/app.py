@@ -3,13 +3,15 @@ import yaml
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 from config.settings import Settings
 from src.api.longport.client import longport_client
 from src.api.longport.personalized.watchlist import get_watchlist
 from src.api.longport.push.watchlist import handle_watchlist_quote
 from longport.openapi import SubType
+from tinydb import TinyDB, Query
+from src.api.notification import AlertManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -18,6 +20,9 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 CONFIG_PATH = os.path.join(os.getcwd(), 'config', 'symbols.yaml')
+FUTU_CONFIG_PATH = Settings.FUTU_SYMBOLS_CONFIG_PATH
+FUTU_DB_PATH = os.path.join(os.getcwd(), 'futu_quotes.json')
+
 CST_TZ = dt_timezone(timedelta(hours=8))
 
 def load_config():
@@ -28,6 +33,16 @@ def load_config():
 
 def save_config(config):
     with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+        yaml.dump(config, f, allow_unicode=True)
+
+def load_futu_config():
+    if os.path.exists(FUTU_CONFIG_PATH):
+        with open(FUTU_CONFIG_PATH, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+def save_futu_config(config):
+    with open(FUTU_CONFIG_PATH, 'w', encoding='utf-8') as f:
         yaml.dump(config, f, allow_unicode=True)
 
 async def check_and_alert(send_alert: bool = False):
@@ -157,22 +172,119 @@ async def get_longport_data(configured_symbols):
         # Return empty list or basic info for configured symbols if API fails
         return [{'symbol': s, 'name': s, 'price': 0, 'change_rate': 0} for s in configured_symbols]
 
+def get_futu_quotes():
+    """Fetch Futu quotes from TinyDB"""
+    try:
+        db = TinyDB(FUTU_DB_PATH)
+        quotes = db.all()
+        db.close()
+        return quotes
+    except Exception as e:
+        logger.error(f"Error reading Futu DB: {e}")
+        return []
+
 @app.route('/')
 async def index():
     try:
+        # LongPort Data
         config = load_config()
         symbols = config.get('symbols', [])
         thresholds = config.get('thresholds', {
             'price_change': Settings.PRICE_CHANGE_THRESHOLD
         })
-        
-        # Fetch real-time data
         market_data = await get_longport_data(symbols)
         
-        return render_template('index.html', symbols=symbols, thresholds=thresholds, market_data=market_data)
+        # Futu Data
+        futu_config = load_futu_config()
+        futu_symbols = futu_config.get('symbols', [])
+        futu_thresholds = futu_config.get('thresholds', {})
+        futu_quotes = get_futu_quotes()
+        
+        return render_template('index.html', 
+                               symbols=symbols, 
+                               thresholds=thresholds, 
+                               market_data=market_data,
+                               futu_symbols=futu_symbols,
+                               futu_thresholds=futu_thresholds,
+                               futu_quotes=futu_quotes)
     except Exception as e:
         logger.error(f"Error in index route: {e}", exc_info=True)
         return f"Internal Server Error: {e}", 500
+
+@app.route('/api/futu/quotes')
+def api_futu_quotes():
+    return jsonify(get_futu_quotes())
+
+from src.api.futu.client import futu_client
+from src.monitor.utils import handle_quote_alert
+
+@app.route('/update_futu_thresholds', methods=['POST'])
+def update_futu_thresholds():
+    try:
+        futu_config = load_futu_config()
+        
+        # Update global price change threshold
+        price_change = request.form.get('price_change')
+        if price_change:
+            if 'thresholds' not in futu_config:
+                futu_config['thresholds'] = {}
+            futu_config['thresholds']['price_change'] = float(price_change)
+        
+        # Remove individual symbol thresholds logic as per request for unified setting
+        # We can optionally clear other keys if needed, but keeping them harmless is safer for now.
+                
+        save_futu_config(futu_config)
+    except ValueError:
+        pass # Handle invalid input
+        
+    return redirect(url_for('index'))
+
+@app.route('/sync_futu_watchlist', methods=['POST'])
+def sync_futu_watchlist():
+    """Sync futu_symbols.yaml with Futu Watchlist"""
+    try:
+        # Initialize client if needed
+        futu_client.get_quote_context(host=Settings.FUTU_HOST, port=Settings.FUTU_PORT)
+        
+        hk_symbols = futu_client.get_hk_user_securities("全部")
+        
+        if hk_symbols:
+            config = load_futu_config()
+            config['symbols'] = hk_symbols
+            save_futu_config(config)
+            logger.info(f"Synced {len(hk_symbols)} Futu symbols.")
+            
+    except Exception as e:
+        logger.error(f"Sync Futu watchlist failed: {e}")
+        
+    return redirect(url_for('index'))
+
+async def check_futu_alerts(send_alert=False):
+    quotes = get_futu_quotes()
+    config = load_futu_config()
+    thresholds = config.get('thresholds', {})
+    
+    count = 0
+    for q in quotes:
+        symbol = q['code']
+        last_price = q['last_price']
+        prev_close = q['prev_close']
+        
+        triggered, _ = await handle_quote_alert(
+            symbol, last_price, prev_close, thresholds, market_type="HK", send_alert=send_alert
+        )
+        if triggered:
+            count += 1
+    return count
+
+@app.route('/trigger_futu_check', methods=['POST'])
+def trigger_futu_check():
+    """Manual trigger to check Futu prices against thresholds and send alerts if matched"""
+    try:
+        asyncio.run(check_futu_alerts(send_alert=True))
+    except Exception as e:
+        logger.error(f"Futu trigger check failed: {e}")
+    return redirect(url_for('index'))
 
 from src.api.longport.push.watchlist import handle_watchlist_quote
 
@@ -199,6 +311,21 @@ def trigger_check():
     except Exception as e:
         print(f"Trigger check failed: {e}")
 
+    return redirect(url_for('index'))
+
+@app.route('/test_alert', methods=['POST'])
+def test_alert():
+    """Send test alerts to verify configuration"""
+    try:
+        # Test DingTalk (US Market default)
+        AlertManager.send_dingtalk("Test Alert (DingTalk): This is a test message to verify DingTalk configuration.")
+        
+        # Test Feishu (HK Market default)
+        AlertManager.send_feishu("This is a test message to verify Feishu configuration.", title="Test Alert (Feishu)")
+        
+        logger.info("Test alerts sent.")
+    except Exception as e:
+        logger.error(f"Test alert failed: {e}")
     return redirect(url_for('index'))
 
 @app.route('/sync_watchlist', methods=['POST'])

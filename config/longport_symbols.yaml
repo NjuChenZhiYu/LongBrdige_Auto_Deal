@@ -73,4 +73,4 @@ symbols:
 - LEGN261218C20000.US
 - LEGN261218C17500.US
 thresholds:
-  price_change: 4.0
+  price_change: 5.0

@@ -35,9 +35,12 @@ class Settings:
     LONGPORT_WS_URL = os.getenv("LONGPORT_WS_URL", "wss://openapi.longportapp.com/v1/quote/ws")
 
     # Alert Webhooks
-    FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
-    DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK")
-    DINGTALK_SECRET = os.getenv("DINGTALK_SECRET")
+    FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "").strip()
+    FEISHU_KEYWORD = os.getenv("FEISHU_KEYWORD", "告警").strip()
+    FEISHU_ALERT_ENABLE = os.getenv("FEISHU_ALERT_ENABLE", "true").lower() == "true"
+    DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK", "").strip()
+    DINGTALK_KEYWORD = os.getenv("DINGTALK_KEYWORD", "告警").strip()
+    DINGTALK_SECRET = os.getenv("DINGTALK_SECRET", "").strip()
     DINGTALK_ALERT_ENABLE = os.getenv("DINGTALK_ALERT_ENABLE", "true").lower() == "true"
     try:
         DINGTALK_RETRY_TIMES = int(os.getenv("DINGTALK_RETRY_TIMES", "3"))
@@ -53,21 +56,34 @@ class Settings:
     MONITOR_SYMBOLS = [s.strip() for s in _symbols_str.split(",") if s.strip()]
 
     # Load symbols from yaml if available
-    SYMBOLS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "symbols.yaml")
-    SYMBOLS_CONFIG = {}
-    if os.path.exists(SYMBOLS_CONFIG_PATH):
-        try:
-            with open(SYMBOLS_CONFIG_PATH, 'r', encoding='utf-8') as f:
-                SYMBOLS_CONFIG = yaml.safe_load(f) or {}
-                # Merge yaml symbols if env MONITOR_SYMBOLS is empty
-                if not MONITOR_SYMBOLS and 'symbols' in SYMBOLS_CONFIG:
-                    MONITOR_SYMBOLS = SYMBOLS_CONFIG['symbols']
-        except Exception as e:
-            print(f"Warning: Failed to load symbols.yaml: {e}")
+    LONGPORT_SYMBOLS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "longport_symbols.yaml")
+    FUTU_SYMBOLS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "futu_symbols.yaml")
+    
+    LONGPORT_SYMBOLS_CONFIG = {}
+    FUTU_SYMBOLS_CONFIG = {}
 
-    # Strategy Thresholds - Priority: symbols.yaml > .env > default
-    # Load from symbols.yaml if available
-    _yaml_thresholds = SYMBOLS_CONFIG.get('thresholds', {})
+    # Load LongPort Symbols
+    if os.path.exists(LONGPORT_SYMBOLS_CONFIG_PATH):
+        try:
+            with open(LONGPORT_SYMBOLS_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                LONGPORT_SYMBOLS_CONFIG = yaml.safe_load(f) or {}
+                # Merge yaml symbols if env MONITOR_SYMBOLS is empty
+                if not MONITOR_SYMBOLS and 'symbols' in LONGPORT_SYMBOLS_CONFIG:
+                    MONITOR_SYMBOLS = LONGPORT_SYMBOLS_CONFIG['symbols']
+        except Exception as e:
+            print(f"Warning: Failed to load longport_symbols.yaml: {e}")
+
+    # Load Futu Symbols
+    if os.path.exists(FUTU_SYMBOLS_CONFIG_PATH):
+        try:
+            with open(FUTU_SYMBOLS_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                FUTU_SYMBOLS_CONFIG = yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"Warning: Failed to load futu_symbols.yaml: {e}")
+
+    # Strategy Thresholds - Priority: longport_symbols.yaml > .env > default
+    # Load from LONGPORT_SYMBOLS_CONFIG if available (Primary source for now)
+    _yaml_thresholds = LONGPORT_SYMBOLS_CONFIG.get('thresholds', {})
     
     try:
         PRICE_CHANGE_THRESHOLD = float(_yaml_thresholds.get('price_change', 
@@ -81,6 +97,11 @@ class Settings:
     except ValueError:
         SPREAD_THRESHOLD = 0.05
 
+    # Futu Configuration
+    FUTU_HOST = os.getenv("FUTU_HOST", "127.0.0.1")
+    FUTU_PORT = int(os.getenv("FUTU_PORT", "45575"))
+    FUTU_PWD_UNLOCK = os.getenv("FUTU_PWD_UNLOCK")
+
     # Trading
     ENABLE_TRADING = os.getenv("ENABLE_TRADING", "false").lower() == "true"
 
@@ -90,31 +111,5 @@ class Settings:
 
     # LLM Configuration
     LLM_API_KEY = os.getenv("LLM_API_KEY")
-    LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
+    LLM_BASE_URL = os.getenv("LLM_BASE_URL")
     LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4-turbo")
-
-    @classmethod
-    def validate(cls):
-        """Validate critical configuration"""
-        missing = []
-        if not cls.LONGPORT_APP_KEY: missing.append("LONGPORT_APP_KEY")
-        if not cls.LONGPORT_APP_SECRET: missing.append("LONGPORT_APP_SECRET")
-        if not cls.LONGPORT_ACCESS_TOKEN: missing.append("LONGPORT_ACCESS_TOKEN")
-        
-        if missing:
-            raise ValueError(f"Missing required configuration: {', '.join(missing)}")
-        
-        if not cls.MONITOR_SYMBOLS:
-            print("Warning: No symbols configured for monitoring (MONITOR_SYMBOLS is empty)")
-
-# Alias for backward compatibility if needed, but prefer Settings
-Config = Settings
-
-# Debug: Print loaded configuration (masked)
-print("-" * 30)
-print("Configuration Loaded:")
-print(f"LONGPORT_APP_KEY: {'*' * 8 if Settings.LONGPORT_APP_KEY else 'None'}")
-print(f"LONGPORT_ACCESS_TOKEN: {'*' * 10 if Settings.LONGPORT_ACCESS_TOKEN else 'None'} (Length: {len(Settings.LONGPORT_ACCESS_TOKEN) if Settings.LONGPORT_ACCESS_TOKEN else 0})")
-print(f"DINGTALK_WEBHOOK: {'*' * 20 if Settings.DINGTALK_WEBHOOK else 'None'}")
-print(f"MONITOR_SYMBOLS: {Settings.MONITOR_SYMBOLS}")
-print("-" * 30)
