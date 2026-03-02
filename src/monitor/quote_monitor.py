@@ -2,7 +2,7 @@ import logging
 import asyncio
 from typing import List, Optional
 from longport.openapi import SubType, QuoteContext
-from src.api.longport.client import LongPortClient
+from src.api.longport.client import longport_client
 from src.api.longport.personalized.watchlist import get_watchlist
 from config.settings import Settings
 
@@ -52,7 +52,8 @@ async def subscribe_watchlist_quote(ctx: QuoteContext) -> List[str]:
         # 3. Subscribe
         # SubType.Quote for real-time quote
         # Native AsyncQuoteContext in v3.0.22+ does not support is_first_push
-        await ctx.subscribe(all_symbols, [SubType.Quote])
+        # Use client wrapper for Market Routing
+        await longport_client.subscribe(ctx, all_symbols, [SubType.Quote])
         
         logger.info("Subscription request sent successfully")
         

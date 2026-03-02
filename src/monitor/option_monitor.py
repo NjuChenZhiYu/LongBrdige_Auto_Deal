@@ -21,22 +21,31 @@ class OptionMonitor:
         self.loop = None
         self._is_running = False
 
-    async def start(self):
-        """Start monitoring option quotes."""
-        self.loop = asyncio.get_running_loop()
+    async def start(self, setup_context=True):
+        """
+        Start monitoring option quotes.
+        :param setup_context: If True, initialize context, set callback and subscribe.
+        """
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+
         if not self.monitored_options:
             logger.warning("No option symbols configured for monitoring.")
             return
 
         try:
-            self.ctx = await longport_client.get_quote_context()
-            # Set callback
-            self.ctx.set_on_quote(self._on_quote_update)
+            if setup_context:
+                self.ctx = await longport_client.get_quote_context()
+                # Set callback
+                self.ctx.set_on_quote(self._on_quote_update)
+                
+                # Subscribe to quotes (options + stocks)
+                subscribe_list = list(set(self.monitored_options + self.monitored_stocks))
+                await self.ctx.subscribe(subscribe_list, [SubType.Quote])
+                logger.info(f"Subscribed to quotes: {subscribe_list}")
             
-            # Subscribe to quotes (options + stocks)
-            subscribe_list = list(set(self.monitored_options + self.monitored_stocks))
-            await self.ctx.subscribe(subscribe_list, [SubType.Quote])
-            logger.info(f"Subscribed to quotes: {subscribe_list}")
             self._is_running = True
         except Exception as e:
             logger.error(f"Failed to start OptionMonitor: {e}")

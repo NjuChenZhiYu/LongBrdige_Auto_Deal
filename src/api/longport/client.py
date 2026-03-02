@@ -62,5 +62,35 @@ class LongPortClient:
             self._trade_ctx = None
         logger.info("LongPort contexts reset")
 
+    async def subscribe(self, ctx, symbols, sub_types):
+        """
+        Subscribe with market routing and permission isolation.
+        Excludes HK symbols (starting with 'HK.').
+        """
+        # 1. Market Routing / Permission Isolation
+        valid_symbols = []
+        for s in symbols:
+            # Check if it looks like a HK symbol (HK.xxxxx)
+            if s.startswith("HK."):
+                logger.warning(f"Market Routing: Symbol {s} excluded from LongPort subscription (HK market not supported)")
+            else:
+                valid_symbols.append(s)
+        
+        if not valid_symbols:
+            logger.warning("No valid non-HK symbols to subscribe")
+            return []
+
+        # 2. Subscribe
+        try:
+            # ctx.subscribe is async
+            return await ctx.subscribe(valid_symbols, sub_types)
+        except Exception as e:
+            logger.error(f"LongPort subscribe error: {e}")
+            # Don't crash, return empty or re-raise if critical
+            # Re-raising might be better for LongPort as it handles its own reconnections mostly,
+            # but we want to avoid crashing the whole monitor task if one sub fails?
+            # Actually, LongPort subscribe usually doesn't fail unless network is down.
+            raise e
+
 # Global client instance
 longport_client = LongPortClient()

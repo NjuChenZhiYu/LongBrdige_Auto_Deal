@@ -3,6 +3,22 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 Set-Location $ProjectRoot
 
+# Stop existing processes
+Write-Host "Stopping existing Python processes for this project..."
+$patterns = @("*src.monitor.watchlist_monitor*", "*src\web\app.py*", "*src/web/app.py*")
+Get-CimInstance Win32_Process | Where-Object { 
+    $cmd = $_.CommandLine
+    if ($cmd) {
+        foreach ($p in $patterns) {
+            if ($cmd -like $p) { return $true }
+        }
+    }
+    return $false
+} | ForEach-Object { 
+    Write-Host "Killing process ID $($_.ProcessId) ($($_.CommandLine))"
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue 
+}
+
 # Check venv
 if (-not (Test-Path "venv_auto_deal")) {
     Write-Host "Error: Virtual environment (venv_auto_deal) not found! Please create it first."

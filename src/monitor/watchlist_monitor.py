@@ -31,9 +31,9 @@ class WatchlistMonitor:
         self.prev_close_cache: Dict[str, float] = {}
         
         # Load initial config from symbols.yaml immediately
-        if os.path.exists(Settings.SYMBOLS_CONFIG_PATH):
+        if os.path.exists(Settings.LONGPORT_SYMBOLS_CONFIG_PATH):
             try:
-                with open(Settings.SYMBOLS_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                with open(Settings.LONGPORT_SYMBOLS_CONFIG_PATH, 'r', encoding='utf-8') as f:
                     new_config = yaml.safe_load(f) or {}
                     if 'thresholds' in new_config:
                         self.threshold_config.update(new_config['thresholds'])
@@ -83,9 +83,9 @@ class WatchlistMonitor:
             logger.info("Refreshing configuration and watchlist...")
             
             # 1. Refresh symbols.yaml thresholds if needed
-            if os.path.exists(Settings.SYMBOLS_CONFIG_PATH):
+            if os.path.exists(Settings.LONGPORT_SYMBOLS_CONFIG_PATH):
                 try:
-                    with open(Settings.SYMBOLS_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                    with open(Settings.LONGPORT_SYMBOLS_CONFIG_PATH, 'r', encoding='utf-8') as f:
                         new_config = yaml.safe_load(f) or {}
                         # Update thresholds if present
                         if 'thresholds' in new_config:
@@ -128,54 +128,66 @@ class WatchlistMonitor:
         except Exception as e:
             logger.error(f"Config refresh failed: {e}")
 
-    async def start(self):
-        """Start the monitor service"""
+    async def start(self, setup_context=True):
+        """
+        Start the monitor service
+        :param setup_context: If True, initialize context, set callback and subscribe. 
+                              If False, assume context is managed externally (e.g. by longport_task).
+        """
         self.running = True
         retry_count = 0
         max_retries = 5
         base_delay = 1
         
         # Register signal handlers
-        self.loop = asyncio.get_running_loop()
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+             # If no running loop, we might be in a process entry point
+             pass
+             
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
                 self.loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
-            except NotImplementedError:
-                # Windows workaround
+            except (NotImplementedError, AttributeError):
+                # Windows workaround or no loop
                 pass
 
-        logger.info("Starting Watchlist Monitor Service...")
+        logger.info(f"Starting Watchlist Monitor Service (setup_context={setup_context})...")
 
         while self.running:
             try:
                 # 1. Initialize Client & Context
                 client = LongPortClient()
-                # Ensure context is clean
-                if retry_count > 0:
-                    await client.reset_context()
+                
+                if setup_context:
+                    # Ensure context is clean
+                    if retry_count > 0:
+                        await client.reset_context()
+                        
+                    self.ctx = await client.get_quote_context()
                     
-                self.ctx = await client.get_quote_context()
-                
-                # 2. Set callback
-                self.ctx.set_on_quote(self._on_quote)
-                
-                # 3. Subscribe
-                self.subscribed_symbols = await subscribe_watchlist_quote(self.ctx)
-                
-                # 4. Fetch initial quotes to cache prev_close prices
-                logger.info("Fetching initial quotes to cache prev_close prices...")
-                try:
-                    initial_quotes = await self.ctx.quote(self.subscribed_symbols)
-                    for q in initial_quotes:
-                        symbol = q.symbol
-                        if hasattr(q, 'prev_close') and q.prev_close:
-                            self.prev_close_cache[symbol] = float(q.prev_close)
-                            logger.info(f"Cached prev_close for {symbol}: {self.prev_close_cache[symbol]}")
-                        else:
-                            logger.warning(f"No prev_close available for {symbol}")
-                    logger.info(f"Cached prev_close for {len(self.prev_close_cache)} symbols")
-                except Exception as e:
-                    logger.error(f"Failed to fetch initial quotes: {e}")
+                    # 2. Set callback
+                    self.ctx.set_on_quote(self._on_quote)
+                    
+                    # 3. Subscribe
+                    self.subscribed_symbols = await subscribe_watchlist_quote(self.ctx)
+                    
+                # 4. Fetch initial quotes to cache prev_close prices (Run for both setup modes)
+                if self.ctx and self.subscribed_symbols:
+                    logger.info("Fetching initial quotes to cache prev_close prices...")
+                    try:
+                        initial_quotes = await self.ctx.quote(self.subscribed_symbols)
+                        for q in initial_quotes:
+                            symbol = q.symbol
+                            if hasattr(q, 'prev_close') and q.prev_close:
+                                self.prev_close_cache[symbol] = float(q.prev_close)
+                                logger.info(f"Cached prev_close for {symbol}: {self.prev_close_cache[symbol]}")
+                            else:
+                                logger.warning(f"No prev_close available for {symbol}")
+                        logger.info(f"Cached prev_close for {len(self.prev_close_cache)} symbols")
+                    except Exception as e:
+                        logger.error(f"Failed to fetch initial quotes: {e}")
                 
                 # Reset retry count on success
                 retry_count = 0
