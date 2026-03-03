@@ -127,7 +127,10 @@ def run_futu_monitor():
     logger.info("Starting Futu Monitoring Task...")
     
     # Initialize TinyDB
-    db_path = os.path.join(os.getcwd(), 'futu_quotes.json')
+    data_dir = os.path.join(os.getcwd(), 'data')
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+    db_path = os.path.join(data_dir, 'futu_quotes.json')
     db = TinyDB(db_path)
     
     # Create an event loop for async tasks (alerts)

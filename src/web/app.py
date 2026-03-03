@@ -21,7 +21,7 @@ app = Flask(__name__)
 
 CONFIG_PATH = os.path.join(os.getcwd(), 'config', 'symbols.yaml')
 FUTU_CONFIG_PATH = Settings.FUTU_SYMBOLS_CONFIG_PATH
-FUTU_DB_PATH = os.path.join(os.getcwd(), 'futu_quotes.json')
+FUTU_DB_PATH = os.path.join(os.getcwd(), 'data', 'futu_quotes.json')
 
 CST_TZ = dt_timezone(timedelta(hours=8))
 
