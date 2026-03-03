@@ -1,6 +1,9 @@
 
 import asyncio
 import logging
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
 from src.monitor.option_monitor import OptionMonitor

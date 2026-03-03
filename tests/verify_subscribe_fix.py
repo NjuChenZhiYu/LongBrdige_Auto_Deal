@@ -1,6 +1,9 @@
 
 import asyncio
 from unittest.mock import MagicMock
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.api.longport.client import AsyncContextAdapter
 
 async def test_subscribe_signature():

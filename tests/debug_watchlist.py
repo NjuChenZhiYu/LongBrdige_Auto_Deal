@@ -3,7 +3,7 @@ import os
 import sys
 
 # Add project root to path
-sys.path.append(os.getcwd())
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.api.longport.client import longport_client
 from src.api.longport.personalized.watchlist import get_watchlist
