@@ -21,7 +21,7 @@ app = Flask(__name__)
 
 CONFIG_PATH = os.path.join(os.getcwd(), 'config', 'symbols.yaml')
 FUTU_CONFIG_PATH = Settings.FUTU_SYMBOLS_CONFIG_PATH
-FUTU_DB_PATH = os.path.join(os.getcwd(), 'futu_quotes.json')
+FUTU_DB_PATH = os.path.join(os.getcwd(), 'data', 'futu_quotes.json')
 
 CST_TZ = dt_timezone(timedelta(hours=8))
 
@@ -266,7 +266,9 @@ async def check_futu_alerts(send_alert=False):
     
     count = 0
     for q in quotes:
-        symbol = q['code']
+        code = q['code']
+        name = q.get('name', '')
+        symbol = f"{code} {name}" if name and name != code else code
         last_price = q['last_price']
         prev_close = q['prev_close']
         

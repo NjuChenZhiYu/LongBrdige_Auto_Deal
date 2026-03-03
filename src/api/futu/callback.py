@@ -78,11 +78,21 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
                 elif "SH." in code or "SZ." in code:
                     market_type = "CN"
                 
+                # Get name for display
+                name = row.get('name', '')
+                if not name and self.db:
+                    # Try to find name in DB
+                    existing = self.db.get(self.Quote.code == code)
+                    if existing:
+                        name = existing.get('name', '')
+                
+                display_symbol = f"{code} {name}" if name and name != code else code
+
                 # Dispatch the alert check to the asyncio loop
                 if self.loop and self.loop.is_running():
                     asyncio.run_coroutine_threadsafe(
                         handle_quote_alert(
-                            symbol=code,
+                            symbol=display_symbol,
                             last_price=last_price,
                             prev_close=prev_close,
                             threshold_config=self.thresholds,
