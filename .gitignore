@@ -1,0 +1,31 @@
+# Environments
+.env
+.env.local
+.env.prod
+config/.env
+config/.secret
+config/credentials.json
+config/token.yaml
+
+# Logs
+logs/
+monitor.log
+nohup.out
+*.log
+
+# Data
+data/
+*.json
+!config/*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+venv_auto_deal/
+
+# IDEs
+.idea/
+.vscode/
+.DS_Store

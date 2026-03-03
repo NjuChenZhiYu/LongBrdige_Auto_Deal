@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>量化交易监控中心</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f4f6f9; }
+        h1, h2, h3 { color: #333; }
+        .card { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input[type="number"], input[type="text"] { padding: 10px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        button:hover { background-color: #0056b3; }
+        button.danger { background-color: #dc3545; }
+        button.danger:hover { background-color: #bd2130; }
+        button.warning-btn { background-color: #ff9800; }
+        button.warning-btn:hover { background-color: #e68a00; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; font-weight: 600; cursor: pointer; user-select: none; }
+        th:hover { background-color: #e9ecef; }
+        tr:hover { background-color: #f1f1f1; }
+        
+        .up { color: #dc3545; font-weight: bold; }
+        .down { color: #28a745; font-weight: bold; }
+        
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 0.8em; margin-right: 5px; }
+        .badge-config { background-color: #e2e3e5; color: #383d41; }
+        .badge-watchlist { background-color: #d1ecf1; color: #0c5460; }
+
+        /* Tabs */
+        .tabs { display: flex; border-bottom: 1px solid #ddd; margin-bottom: 20px; }
+        .tab { padding: 10px 20px; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; color: #555; }
+        .tab:hover { background-color: #f8f9fa; }
+        .tab.active { background-color: #fff; border-color: #ddd; border-bottom-color: #fff; color: #007bff; font-weight: bold; margin-bottom: -1px; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .grid-container { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <h1>量化交易监控中心</h1>
+    
+    <div class="tabs">
+        <div class="tab active" onclick="openTab(event, 'us-market')">美股市场 (LongPort)</div>
+        <div class="tab" onclick="openTab(event, 'hk-market')">港股市场 (Futu)</div>
+    </div>
+
+    <!-- US Market Tab -->
+    <div id="us-market" class="tab-content active">
+        <div class="grid-container">
+            <div class="card">
+                <h2>美股监控阈值</h2>
+                <form action="/update_thresholds" method="POST">
+                    <div class="form-group">
+                        <label for="price_change">价格波动阈值 (%)</label>
+                        <input type="number" step="0.1" id="price_change" name="price_change" value="{{ thresholds.get('price_change', 1.0) }}" required>
+                        <div class="hint">当股价涨跌幅超过此值时触发告警。</div>
+                    </div>
+                    <button type="submit">保存阈值配置</button>
+                </form>
+            </div>
+            
+            <div class="card">
+                <h2>手动触发检查</h2>
+                <form action="/trigger_check" method="POST">
+                    <p>立即检查并推送预警 (仅当满足阈值时)。</p>
+                    <button type="submit" class="warning-btn">立即检查</button>
+                </form>
+                <form action="/test_alert" method="POST" style="margin-top: 15px;">
+                    <p>强制发送测试消息 (验证 Webhook 和关键词)。</p>
+                    <button type="submit" style="background-color: #9C27B0;">发送测试告警</button>
+                </form>
+                <hr>
+                <h2>同步自选股</h2>
+                <form action="/sync_watchlist" method="POST">
+                    <button type="submit" style="background-color: #2196F3;">从 LongPort 同步</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>美股实时监控列表</h2>
+            <div class="hint">包含 LongPort App 自选股及本地配置标的</div>
+            
+            <table id="us-table">
+                <thead>
+                    <tr>
+                        <th onclick="sortUsTable(0)">代码 ⬍</th>
+                        <th onclick="sortUsTable(1)">名称 ⬍</th>
+                        <th onclick="sortUsTable(2)">最新价 (USD) ⬍</th>
+                        <th onclick="sortUsTable(3)">涨跌幅 ⬍</th>
+                        <th onclick="sortUsTable(4)">来源 ⬍</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="us-tbody">
+                    {% for item in market_data %}
+                    <tr>
+                        <td>{{ item.symbol }}</td>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.price }}</td>
+                        <td class="{{ 'up' if item.change_rate > 0 else 'down' }}" data-value="{{ item.change_rate }}">
+                            {{ "%.2f"|format(item.change_rate) }}%
+                        </td>
+                        <td>
+                            {% if item.is_config %}<span class="badge badge-config">本地配置</span>{% endif %}
+                            {% if item.is_watchlist %}<span class="badge badge-watchlist">LongPort自选</span>{% endif %}
+                        </td>
+                        <td>
+                            {% if item.is_config %}
+                            <form action="/remove_symbol" method="POST" style="display: inline;">
+                                <input type="hidden" name="symbol" value="{{ item.symbol }}">
+                                <button type="submit" class="danger" style="padding: 4px 8px; font-size: 0.8em;">移除</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" style="text-align: center;">暂无监控标的</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <h3 style="margin-top: 20px;">添加本地监控</h3>
+            <form action="/add_symbol" method="POST" style="display: flex; gap: 10px;">
+                <input type="text" name="symbol" placeholder="输入股票代码 (如 AAPL.US)" required>
+                <button type="submit">添加</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- HK Market Tab -->
+    <div id="hk-market" class="tab-content">
+        <div class="grid-container">
+            <div class="card">
+                <h2>港股监控阈值 (Futu)</h2>
+                <form action="/update_futu_thresholds" method="POST">
+                    <div class="form-group">
+                        <label for="futu_price_change">全局价格波动阈值 (%)</label>
+                        <input type="number" step="0.1" id="futu_price_change" name="price_change" value="{{ futu_thresholds.get('price_change', 2.0) }}" required>
+                        <div class="hint">当股价涨跌幅超过此值时触发告警。</div>
+                    </div>
+                    <button type="submit">保存港股阈值</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>手动触发检查</h2>
+                <form action="/trigger_futu_check" method="POST">
+                    <p>立即检查并推送预警。</p>
+                    <button type="submit" class="warning-btn">立即检查 (飞书推送)</button>
+                </form>
+                <form action="/test_alert" method="POST" style="margin-top: 15px;">
+                    <p>强制发送测试消息 (验证 Webhook 和关键词)。</p>
+                    <button type="submit" style="background-color: #9C27B0;">发送测试告警</button>
+                </form>
+                <hr>
+                <h2>同步自选股</h2>
+                <form action="/sync_futu_watchlist" method="POST">
+                    <button type="submit" style="background-color: #2196F3;">从 Futu 同步</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>港股实时行情</h2>
+            <div style="margin-bottom: 10px;">
+                <button onclick="refreshFutuQuotes()">刷新行情</button>
+                <span id="last-updated" style="margin-left: 10px; color: #666;"></span>
+            </div>
+            
+            <table id="futu-table">
+                <thead>
+                    <tr>
+                        <th onclick="sortTable(0)">代码 ⬍</th>
+                        <th onclick="sortTable(1)">名称 ⬍</th>
+                        <th onclick="sortTable(2)">最新价 ⬍</th>
+                        <th onclick="sortTable(3)">涨跌额 ⬍</th>
+                        <th onclick="sortTable(4)">涨跌幅 (%) ⬍</th>
+                        <th onclick="sortTable(5)">成交量 ⬍</th>
+                        <th onclick="sortTable(6)">更新时间 ⬍</th>
+                    </tr>
+                </thead>
+                <tbody id="futu-tbody">
+                    {% for quote in futu_quotes %}
+                    <tr>
+                        <td>{{ quote.code }}</td>
+                        <td>{{ quote.name }}</td>
+                        <td>{{ quote.last_price }}</td>
+                        <td class="{{ 'up' if quote.change_amount > 0 else 'down' }}">{{ "%.3f"|format(quote.change_amount) }}</td>
+                        <td class="{{ 'up' if quote.change_rate > 0 else 'down' }}">{{ "%.2f"|format(quote.change_rate) }}%</td>
+                        <td>{{ quote.volume }}</td>
+                        <td>{{ quote.update_time }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7" style="text-align: center;">暂无行情数据 (请确保Futu Monitor正在运行)</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let currentUsSortColumn = -1;
+        let currentUsSortDirection = 'asc';
+
+        function sortUsTable(n) {
+            const table = document.getElementById("us-table");
+            const tbody = document.getElementById("us-tbody");
+            const rows = Array.from(tbody.rows);
+            
+            // Handle "No data" row
+            if (rows.length === 1 && rows[0].cells.length === 1) return;
+
+            // Toggle direction
+            if (currentUsSortColumn === n) {
+                currentUsSortDirection = currentUsSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentUsSortColumn = n;
+                currentUsSortDirection = 'asc';
+            }
+
+            // Update headers visual
+            const headers = table.querySelectorAll('th');
+            headers.forEach((th, index) => {
+                let text = th.innerText.replace(' ▲', '').replace(' ▼', '').replace(' ⬍', '');
+                if (index === n) {
+                    th.innerText = text + (currentUsSortDirection === 'asc' ? ' ▲' : ' ▼');
+                } else if (index < 5) { // Skip "Action" column
+                    th.innerText = text + ' ⬍';
+                }
+            });
+
+            // Sort rows
+            rows.sort((rowA, rowB) => {
+                const cellA = rowA.cells[n];
+                const cellB = rowB.cells[n];
+                let valA, valB;
+
+                // Extract value based on column
+                if (n === 2) { // Price
+                    valA = parseFloat(cellA.innerText);
+                    valB = parseFloat(cellB.innerText);
+                } else if (n === 3) { // Change Rate
+                    // Use data-value attribute if available, otherwise parse text
+                    valA = parseFloat(cellA.getAttribute('data-value'));
+                    valB = parseFloat(cellB.getAttribute('data-value'));
+                    if (isNaN(valA)) valA = parseFloat(cellA.innerText.replace('%', ''));
+                    if (isNaN(valB)) valB = parseFloat(cellB.innerText.replace('%', ''));
+                } else { // Text
+                    valA = cellA.innerText.trim().toLowerCase();
+                    valB = cellB.innerText.trim().toLowerCase();
+                }
+
+                if (valA < valB) return currentUsSortDirection === 'asc' ? -1 : 1;
+                if (valA > valB) return currentUsSortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            // Re-append rows
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        let currentSortColumn = -1;
+        let currentSortDirection = 'asc';
+
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+                tabcontent[i].classList.remove("active");
+            }
+            tablinks = document.getElementsByClassName("tab");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].classList.remove("active");
+            }
+            document.getElementById(tabName).style.display = "block";
+            document.getElementById(tabName).classList.add("active");
+            evt.currentTarget.classList.add("active");
+        }
+
+        async function refreshFutuQuotes() {
+            try {
+                const response = await fetch('/api/futu/quotes');
+                let quotes = await response.json();
+                
+                // Apply sorting if active
+                if (currentSortColumn !== -1) {
+                    quotes.sort((a, b) => {
+                        let valA, valB;
+                        // Map column index to property
+                        switch(currentSortColumn) {
+                            case 0: valA = a.code; valB = b.code; break;
+                            case 1: valA = a.name; valB = b.name; break;
+                            case 2: valA = a.last_price; valB = b.last_price; break;
+                            case 3: valA = a.change_amount; valB = b.change_amount; break;
+                            case 4: valA = a.change_rate; valB = b.change_rate; break;
+                            case 5: valA = a.volume; valB = b.volume; break;
+                            case 6: valA = a.update_time; valB = b.update_time; break;
+                            default: return 0;
+                        }
+                        
+                        if (valA < valB) return currentSortDirection === 'asc' ? -1 : 1;
+                        if (valA > valB) return currentSortDirection === 'asc' ? 1 : -1;
+                        return 0;
+                    });
+                }
+
+                const tbody = document.getElementById('futu-tbody');
+                tbody.innerHTML = '';
+                
+                if (quotes.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">暂无行情数据</td></tr>';
+                    return;
+                }
+
+                quotes.forEach(quote => {
+                    const tr = document.createElement('tr');
+                    const upDownClass = quote.change_rate > 0 ? 'up' : 'down';
+                    tr.innerHTML = `
+                        <td>${quote.code}</td>
+                        <td>${quote.name}</td>
+                        <td>${quote.last_price}</td>
+                        <td class="${upDownClass}">${quote.change_amount.toFixed(3)}</td>
+                        <td class="${upDownClass}">${quote.change_rate.toFixed(2)}%</td>
+                        <td>${quote.volume}</td>
+                        <td>${quote.update_time}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+                
+                document.getElementById('last-updated').textContent = '最后更新: ' + new Date().toLocaleTimeString();
+            } catch (error) {
+                console.error('Error fetching quotes:', error);
+            }
+        }
+
+        // Auto refresh every 5 seconds if HK tab is active
+        setInterval(() => {
+            if (document.getElementById('hk-market').style.display === 'block') {
+                refreshFutuQuotes();
+            }
+        }, 5000);
+
+        function sortTable(n) {
+            // Toggle direction if clicking same column
+            if (currentSortColumn === n) {
+                currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = n;
+                currentSortDirection = 'asc';
+            }
+            
+            // Trigger refresh to apply sort
+            refreshFutuQuotes();
+            
+            // Update header indicators (optional visual feedback)
+            const headers = document.querySelectorAll('#futu-table th');
+            headers.forEach((th, index) => {
+                let text = th.innerText.replace(' ▲', '').replace(' ▼', '').replace(' ⬍', '');
+                if (index === n) {
+                    th.innerText = text + (currentSortDirection === 'asc' ? ' ▲' : ' ▼');
+                } else {
+                    th.innerText = text + ' ⬍';
+                }
+            });
+        }
+    </script>
+</body>
+</html>
