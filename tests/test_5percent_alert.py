@@ -1,5 +1,8 @@
 import asyncio
 import logging
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.api.longport.client import longport_client
 from src.api.longport.push.watchlist import handle_watchlist_quote
 from src.api.longport.personalized.watchlist import get_watchlist
