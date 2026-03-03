@@ -39,8 +39,11 @@ class FutuClient:
         # 1. Market Routing / Permission Isolation
         valid_symbols = []
         for s in symbols:
-            if s.startswith("HK."):
-                valid_symbols.append(s)
+            # Handle "Code Name" format from yaml
+            code = s.split(' ')[0] if ' ' in s else s
+            
+            if code.startswith("HK."):
+                valid_symbols.append(code)
             else:
                 logger.warning(f"Market Routing: Symbol {s} excluded from Futu subscription (Non-HK market)")
         
@@ -84,8 +87,9 @@ class FutuClient:
             hk_symbols = []
             for _, row in data.iterrows():
                 code = row['code']
+                name = row['name']
                 if code.startswith("HK."):
-                    hk_symbols.append(code)
+                    hk_symbols.append(f"{code} {name}")
             
             logger.info(f"Retrieved {len(hk_symbols)} HK symbols from user security group '{group_name}'")
             return hk_symbols

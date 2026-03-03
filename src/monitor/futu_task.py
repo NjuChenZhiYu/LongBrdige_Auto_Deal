@@ -154,14 +154,17 @@ def run_futu_monitor():
         
         # Subscribe to symbols
         symbols = Settings.FUTU_SYMBOLS_CONFIG.get('symbols', [])
-        if symbols:
+        # Parse 'Code Name' format to get clean codes for snapshot
+        clean_symbols = [s.split(' ')[0] if ' ' in s else s for s in symbols]
+        
+        if clean_symbols:
             logger.info(f"Subscribing to Futu symbols: {symbols}")
             # Subscribe to Quote using client wrapper for Market Routing
             ret, data = futu_client.subscribe(symbols, [SubType.QUOTE], is_first_push=True)
             if ret == RET_OK:
                 logger.info(f"Successfully subscribed to Futu symbols")
                 # Fetch initial snapshot to populate DB immediately
-                fetch_initial_snapshot(ctx, symbols, db)
+                fetch_initial_snapshot(ctx, clean_symbols, db)
             else:
                 logger.error(f"Failed to subscribe: {data}")
         else:
@@ -179,3 +182,10 @@ def run_futu_monitor():
         if 'ctx' in locals():
             ctx.close()
         loop.close()
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, 
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    run_futu_monitor()

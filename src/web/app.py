@@ -266,7 +266,9 @@ async def check_futu_alerts(send_alert=False):
     
     count = 0
     for q in quotes:
-        symbol = q['code']
+        code = q['code']
+        name = q.get('name', '')
+        symbol = f"{code} {name}" if name and name != code else code
         last_price = q['last_price']
         prev_close = q['prev_close']
         
