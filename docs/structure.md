@@ -3,24 +3,31 @@
 本文件定义了项目的标准化目录结构，需严格遵循长桥OpenAPI官方模块分类（拉取、订阅、推送、个性化、标的），同时保留工程化的核心目录（analysis/monitor/utils等），确保代码结构清晰、可维护。
 
 ## 一、整体项目目录结构
-LongBridge_Auto_Deal/
-├── config/                 # 集中配置层
+Global_Quant_System/          # (建议改个更宏大的名字，比如这个)
+├── config/ 
 │   ├── .env.example
-│   ├── settings.py         # 核心配置加载器 (Settings 类)
-│   └── symbols.yaml        # 标的与阈值配置
+│   ├── settings.py 
+│   ├── longport_symbols.yaml # 明确为长桥美股/期权配置
+│   └── futu_symbols.yaml     # 【新增】富途港股标的与阈值配置
 ├── src/
 │   ├── api/
-│   │   ├── longport/       # 长桥 API 核心
-│   │   │   ├── client.py   # 客户端单例
-│   │   │   ├── push/       # 推送处理
-│   │   │   ├── pull/       # 拉取接口 (预留)
-│   │   │   ├── subscribe/  # 订阅管理 (预留)
+│   │   ├── longport/         # (保持原样，完全不影响现有稳定运行的功能)
+│   │   │   ├── client.py 
+│   │   │   ├── push/ 
 │   │   │   └── ...
-│   │   └── notification.py # 告警模块
-│   ├── analysis/           # 策略分析
-│   ├── monitor/            # 监控主控
-│   └── utils/              # 通用工具
-└── main.py                 # 入口文件
+│   │   ├── futu/             # 【新增】富途 API 核心 (适配器)
+│   │   │   ├── client.py     # 富途 OpenD 客户端单例初始化
+│   │   │   ├── callback/     # 富途底层是回调机制，对应长桥的 push
+│   │   │   └── ...
+│   │   └── notification.py   # 共享：钉钉/飞书告警模块 (长桥和富途共用它)
+│   ├── analysis/             # 共享：Kimi/Gemini 大模型策略分析引擎
+│   │   ├── llm_engine.py     # 【建议新增】专门负责调用大模型生成研报
+│   │   └── strategy.py       # 共享的异动计算公式 (如 IV 计算、均量对比)
+│   ├── monitor/ 
+│   │   ├── longport_task.py  # 【重构】原有的长桥监控主控
+│   │   └── futu_task.py      # 【新增】富途的监控主控
+│   └── utils/ 
+└── main.py                   # 【重构】使用多进程启动长桥和富途两个 Task，每个进程负责一个监控循环
 
 ## 二、目录/文件职责说明
 ### 1. config/ 目录
