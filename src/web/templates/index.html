@@ -77,6 +77,13 @@
                     <button type="submit" style="background-color: #9C27B0;">发送测试告警</button>
                 </form>
                 <hr>
+                <h2>🤖 AI 智能分析</h2>
+                <form action="/generate_ai_report" method="POST">
+                    <p>基于当前自选股行情，生成 AI 分析报告。</p>
+                    <input type="hidden" name="market_type" value="US">
+                    <button type="submit" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">生成美股研报</button>
+                </form>
+                <hr>
                 <h2>同步自选股</h2>
                 <form action="/sync_watchlist" method="POST">
                     <button type="submit" style="background-color: #2196F3;">从 LongPort 同步</button>
@@ -159,6 +166,13 @@
                 <form action="/test_alert" method="POST" style="margin-top: 15px;">
                     <p>强制发送测试消息 (验证 Webhook 和关键词)。</p>
                     <button type="submit" style="background-color: #9C27B0;">发送测试告警</button>
+                </form>
+                <hr>
+                <h2>🤖 AI 智能分析</h2>
+                <form action="/generate_ai_report" method="POST">
+                    <p>基于当前港股行情，生成 AI 分析报告。</p>
+                    <input type="hidden" name="market_type" value="HK">
+                    <button type="submit" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">生成港股研报</button>
                 </form>
                 <hr>
                 <h2>同步自选股</h2>

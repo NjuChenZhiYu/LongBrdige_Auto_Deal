@@ -340,6 +340,21 @@ def test_alert():
         logger.error(f"Test alert failed: {e}")
     return redirect(url_for('index'))
 
+@app.route('/generate_ai_report', methods=['POST'])
+def generate_ai_report():
+    """Generate AI analysis report for current watchlist stocks"""
+    try:
+        market_type = request.form.get('market_type', 'US')
+        logger.info(f"Manual AI report generation triggered for {market_type} market")
+        
+        # Run the report generation
+        asyncio.run(llm_analyst.generate_stock_report(market_type))
+        
+        logger.info(f"AI report for {market_type} generated and sent successfully")
+    except Exception as e:
+        logger.error(f"AI report generation failed: {e}")
+    return redirect(url_for('index'))
+
 @app.route('/sync_watchlist', methods=['POST'])
 def sync_watchlist():
     """Sync symbols.yaml with LongPort Watchlist"""
