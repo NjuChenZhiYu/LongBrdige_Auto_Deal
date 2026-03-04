@@ -271,9 +271,19 @@ async def check_futu_alerts(send_alert=False):
         symbol = f"{code} {name}" if name and name != code else code
         last_price = q['last_price']
         prev_close = q['prev_close']
+        volume = q.get('volume', 0)
+        # Calculate approximate turnover (volume * price)
+        turnover = volume * last_price if volume and last_price else 0
         
         triggered, _ = await handle_quote_alert(
-            symbol, last_price, prev_close, thresholds, market_type="HK", send_alert=send_alert
+            symbol=symbol, 
+            last_price=last_price, 
+            prev_close=prev_close, 
+            threshold_config=thresholds, 
+            market_type="HK", 
+            send_alert=send_alert,
+            volume=volume,
+            turnover=turnover
         )
         if triggered:
             count += 1

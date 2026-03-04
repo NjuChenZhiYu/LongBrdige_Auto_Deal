@@ -4,6 +4,7 @@ from typing import Dict, Tuple, Optional
 from src.api.dingtalk import DingTalkAlert
 from src.api.feishu import FeishuAlert
 from src.api.llm import llm_analyzer
+from src.services.signal_recorder import signal_recorder
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +14,13 @@ async def handle_quote_alert(
     prev_close: float, 
     threshold_config: Dict, 
     market_type: str = "US",
-    send_alert: bool = False
+    send_alert: bool = False,
+    volume: int = 0,
+    turnover: float = 0.0
 ) -> Tuple[bool, Dict]:
     """
     Generic handler for quote alerts with LLM analysis. Checks thresholds and sends alerts if triggered.
+    Records alert to SignalRecorder for daily report generation.
     
     :param symbol: Stock symbol (e.g., 'AAPL', 'HK.00700')
     :param last_price: Current price
@@ -24,6 +28,8 @@ async def handle_quote_alert(
     :param threshold_config: Configuration for thresholds (e.g., {'price_change': 2.0})
     :param market_type: Market identifier for the alert message (e.g., 'US', 'HK')
     :param send_alert: Whether to actually send the alert
+    :param volume: Trading volume
+    :param turnover: Trading turnover
     :return: (triggered, alert_data)
     """
     triggered = False
@@ -41,6 +47,17 @@ async def handle_quote_alert(
                 direction = "涨" if change_rate > 0 else "跌"
                 market_name = "美股" if market_type == "US" else "港股" if market_type == "HK" else market_type
                 
+                # Record alert to SignalRecorder for daily report
+                signal_recorder.add_stock_alert({
+                    "symbol": symbol,
+                    "market_type": market_type,
+                    "last_price": last_price,
+                    "change_rate": change_rate,
+                    "volume": volume,
+                    "turnover": turnover,
+                    "timestamp": current_time_str
+                })
+                
                 # Get LLM analysis
                 llm_analysis = None
                 if send_alert:
@@ -49,6 +66,8 @@ async def handle_quote_alert(
                         last_price=last_price,
                         change_rate=change_rate,
                         prev_close=prev_close,
+                        volume=volume,
+                        turnover=turnover,
                         market_type=market_type
                     )
                 
