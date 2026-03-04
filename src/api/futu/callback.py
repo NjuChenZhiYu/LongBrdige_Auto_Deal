@@ -49,6 +49,12 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
                 
                 # Update TinyDB if available
                 if self.db:
+                    # If prev_close is missing in push, try to get from DB
+                    if prev_close <= 0:
+                        existing = self.db.get(self.Quote.code == code)
+                        if existing and 'prev_close' in existing:
+                            prev_close = float(existing['prev_close'])
+
                     # Calculate change rate
                     change_rate = 0.0
                     change_amount = 0.0
@@ -58,17 +64,23 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
                     
                     volume = int(row.get('volume', 0))
                     
+                    # Prepare update data
                     quote_data = {
                         'code': code,
-                        'name': row.get('name', code), # Futu might not return name in quote, need check
                         'last_price': last_price,
-                        'prev_close': prev_close,
                         'change_amount': change_amount,
                         'change_rate': change_rate,
-                        'volume': volume,
                         'update_time': row.get('data_time', '') or row.get('time_key', '')
                     }
                     
+                    # Only update fields that exist or matter
+                    if prev_close > 0:
+                        quote_data['prev_close'] = prev_close
+                    if volume > 0:
+                        quote_data['volume'] = volume
+                    if 'name' in row:
+                        quote_data['name'] = row['name']
+
                     self.db.upsert(quote_data, self.Quote.code == code)
 
                 # Determine market type from code (e.g., HK.00700 -> HK, US.AAPL -> US)
