@@ -11,3 +11,4 @@ openai>=1.0.0
 scipy>=1.10.0
 futu-api>=3.0.0
 tinydb>=4.7.0
+httpx>=0.24.0

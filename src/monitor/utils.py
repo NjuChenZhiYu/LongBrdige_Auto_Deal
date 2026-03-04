@@ -3,6 +3,7 @@ import datetime
 from typing import Dict, Tuple, Optional
 from src.api.dingtalk import DingTalkAlert
 from src.api.feishu import FeishuAlert
+from src.api.llm import llm_analyzer
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ async def handle_quote_alert(
     send_alert: bool = False
 ) -> Tuple[bool, Dict]:
     """
-    Generic handler for quote alerts. Checks thresholds and sends DingTalk/Feishu alerts if triggered.
+    Generic handler for quote alerts with LLM analysis. Checks thresholds and sends alerts if triggered.
     
     :param symbol: Stock symbol (e.g., 'AAPL', 'HK.00700')
     :param last_price: Current price
@@ -40,16 +41,34 @@ async def handle_quote_alert(
                 direction = "涨" if change_rate > 0 else "跌"
                 market_name = "美股" if market_type == "US" else "港股" if market_type == "HK" else market_type
                 
+                # Get LLM analysis
+                llm_analysis = None
+                if send_alert:
+                    llm_analysis = await llm_analyzer.analyze_stock_alert(
+                        symbol=symbol,
+                        last_price=last_price,
+                        change_rate=change_rate,
+                        prev_close=prev_close,
+                        market_type=market_type
+                    )
+                
                 title = f"[{market_type} Alert] {symbol} {direction}幅≥{price_change_threshold}%"
-                content = f"""
-### {market_name}价格异动告警
+                content = f"""### {market_name}价格异动告警
 * **标的**：{symbol}
 * **最新价**：{last_price}
 * **涨跌幅**：{change_rate:.2f}% (昨收：{prev_close})
 * **触发规则**：{direction}幅≥{price_change_threshold}%
 * **更新时间**：{current_time_str}
 * **Keywords**: {market_type}, Alert, {market_name}, 监控, 告警
-                """
+"""
+                
+                # Add LLM analysis if available
+                if llm_analysis:
+                    content += f"""\n### 🤖 AI 智能分析
+{llm_analysis}
+"""
+                else:
+                    content += "\n*（AI 分析未启用或生成失败）*"
                 
                 # Asynchronous alert sending
                 reason_suffix = "rise" if change_rate > 0 else "fall"
@@ -59,16 +78,17 @@ async def handle_quote_alert(
                         # Use Feishu for HK market
                         feishu_content = f"{content}\n\n[Feishu Alert Channel]"
                         await FeishuAlert.send_alert(title, feishu_content)
-                        logger.info(f"Feishu alert sent for {symbol}: {change_rate:.2f}%")
+                        logger.info(f"Feishu alert with LLM analysis sent for {symbol}: {change_rate:.2f}%")
                     else:
                         # Use DingTalk for other markets (US)
                         await DingTalkAlert.send_alert(title, content, symbol, f"price_change_{reason_suffix}")
-                        logger.info(f"DingTalk alert sent for {symbol}: {change_rate:.2f}%")
+                        logger.info(f"DingTalk alert with LLM analysis sent for {symbol}: {change_rate:.2f}%")
                 else:
                     logger.info(f"Alert condition met for {symbol} ({change_rate:.2f}%), but sending skipped (send_alert=False)")
                     
                 triggered = True
                 alert_data['price_change'] = change_rate
+                alert_data['llm_analysis'] = llm_analysis
                 
     except Exception as e:
         logger.error(f"Error in handle_quote_alert for {symbol}: {e}")
