@@ -176,24 +176,28 @@ class LLMAnalyst:
 
     async def generate_live_report(self, market_type: str = "US"):
         """
-        Generate real-time report from live market data (not from recorded signals).
-        This allows manual report generation even when no alerts were triggered.
+        Generate real-time report based on watchlist stocks that exceed threshold.
+        Only include stocks with significant changes (>= threshold) in the analysis.
         
         Args:
             market_type: "US" or "HK"
         """
         from src.api.longport.personalized.watchlist import get_watchlist
         from src.api.longport.client import longport_client
+        from config.settings import Settings
         
         market_name = "美股" if market_type == "US" else "港股"
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
         
+        # Get threshold from settings (default 5%)
+        threshold = getattr(Settings, 'PRICE_CHANGE_THRESHOLD', 5.0)
+        
         try:
-            logger.info(f"Generating live {market_name} report...")
+            logger.info(f"Generating {market_name} report for stocks exceeding {threshold}% threshold...")
             
-            # Get watchlist symbols
+            # Get watchlist symbols (with deduplication)
             watchlist_items = await get_watchlist()
-            symbols = [item['symbol'] for item in watchlist_items]
+            symbols = list(set([item['symbol'] for item in watchlist_items]))
             
             if not symbols:
                 logger.warning(f"No symbols in watchlist for {market_type}")
@@ -203,77 +207,111 @@ class LLMAnalyst:
             ctx = await longport_client.get_quote_context()
             quotes = await ctx.quote(symbols)
             
-            # Filter stocks with significant changes (>3%)
-            significant_changes = []
+            if not quotes:
+                logger.warning(f"No quotes returned for {market_type}")
+                return
+            
+            # Filter stocks that EXCEED threshold (with deduplication)
+            threshold_stocks = []
+            seen_symbols = set()  # Track seen symbols for deduplication
+            
             for q in quotes:
-                prev_close = float(getattr(q, 'prev_close', 0))
-                last_done = float(getattr(q, 'last_done', 0))
+                if q is None:
+                    continue
+                symbol = getattr(q, 'symbol', None)
+                if not symbol or symbol in seen_symbols:  # Skip if already seen
+                    continue
+                prev_close = float(getattr(q, 'prev_close', 0) or 0)
+                last_done = float(getattr(q, 'last_done', 0) or 0)
                 if prev_close > 0:
                     change_rate = ((last_done - prev_close) / prev_close) * 100
-                    if abs(change_rate) >= 3.0:  # Lower threshold for report
-                        significant_changes.append({
-                            'symbol': q.symbol,
+                    if abs(change_rate) >= threshold:  # Only stocks exceeding threshold
+                        threshold_stocks.append({
+                            'symbol': symbol,
                             'last_price': last_done,
                             'change_rate': change_rate,
                             'prev_close': prev_close
                         })
+                        seen_symbols.add(symbol)  # Mark as seen
             
-            # Sort by absolute change rate
-            significant_changes.sort(key=lambda x: abs(x['change_rate']), reverse=True)
+            # Sort by absolute change rate (most significant first)
+            threshold_stocks.sort(key=lambda x: abs(x['change_rate']), reverse=True)
             
-            if not significant_changes:
-                # Even if no significant changes, report top movers
-                all_changes = []
-                for q in quotes:
-                    prev_close = float(getattr(q, 'prev_close', 0))
-                    last_done = float(getattr(q, 'last_done', 0))
-                    if prev_close > 0:
-                        change_rate = ((last_done - prev_close) / prev_close) * 100
-                        all_changes.append({
-                            'symbol': q.symbol,
-                            'last_price': last_done,
-                            'change_rate': change_rate,
-                            'prev_close': prev_close
-                        })
-                all_changes.sort(key=lambda x: abs(x['change_rate']), reverse=True)
-                significant_changes = all_changes[:10]  # Top 10 movers
+            if not threshold_stocks:
+                logger.info(f"No stocks exceeded {threshold}% threshold for {market_type}")
+                # Send notification that no stocks triggered
+                title = f"[AI Analyst] {market_name}研报 ({current_time})"
+                content = f"当前自选股中无标的涨跌幅超过 {threshold}% 阈值，暂无显著异动。"
+                if market_type == "HK":
+                    await FeishuAlert.send_alert(title, content)
+                else:
+                    await DingTalkAlert.send_alert(title, content, "MARKET_REPORT", "no_trigger")
+                return
             
-            # Build prompt
-            up_count = sum(1 for c in significant_changes if c['change_rate'] > 0)
-            down_count = len(significant_changes) - up_count
-            avg_change = sum(c['change_rate'] for c in significant_changes) / len(significant_changes) if significant_changes else 0
+            # Build stock list for LLM
+            stock_list_text = ""
+            for i, stock in enumerate(threshold_stocks[:20], 1):  # Top 20
+                direction = "上涨" if stock['change_rate'] > 0 else "下跌"
+                stock_list_text += f"{i}. {stock['symbol']}: 现价 ${stock['last_price']:.2f}, {direction} {stock['change_rate']:+.2f}%\n"
             
-            alert_text = f"【{market_name}市场实时观察 - {current_time}】\n\n"
-            alert_text += f"**市场整体概况**：\n"
-            alert_text += f"- 监控标的总数：{len(symbols)} 只\n"
-            alert_text += f"- 显著异动标的：{len(significant_changes)} 只\n"
-            alert_text += f"- 上涨家数：{up_count} 只 | 下跌家数：{down_count} 只\n"
-            alert_text += f"- 平均涨跌幅：{avg_change:+.2f}%\n\n"
-            alert_text += f"**重点标的详情**：\n"
+            # Build prompt for LLM
+            up_count = sum(1 for s in threshold_stocks if s['change_rate'] > 0)
+            down_count = len(threshold_stocks) - up_count
             
-            for i, c in enumerate(significant_changes[:15], 1):
-                symbol = c['symbol']
-                price = c['last_price']
-                change = c['change_rate']
-                direction = "📈上涨" if change > 0 else "📉下跌"
-                alert_text += f"{i}. {symbol}: ${price:.2f}, 涨跌幅 {change:+.2f}%, {direction}\n"
-            
-            # Call LLM
+            prompt = f"""作为专业股票分析师，请基于以下{market_name}自选股中**涨跌幅超过 {threshold}% 阈值**的标的列表，生成一份投资分析研报。
+
+【筛选条件】
+- 监控范围：自选股共 {len(symbols)} 只
+- 阈值条件：|涨跌幅| >= {threshold}%
+- 触发标的：{len(threshold_stocks)} 只（上涨 {up_count} 只，下跌 {down_count} 只）
+
+【超出阈值的标的列表】
+{stock_list_text}
+
+【研报要求】（严格遵循）
+1. 字数：300-500 字之间，必须完整，不要截断
+2. 结构：
+   - 整体研判：基于上述列表，判断当前市场情绪（50-80字）
+   - 板块分析：如有明显的板块集中特征，请指出（80-100字）
+   - 重点点评：挑选2-3只最具代表性的股票进行简要点评（100-150字）
+   - 投资建议：基于当前数据给出策略建议或风险提示（70-100字）
+3. 语言：专业、简洁、有洞察
+4. 重要：必须生成完整内容，在500字内完成所有分析，不要出现未完成的句子
+
+请直接输出研报正文，不要包含标题、格式说明或字数标注。"""
+
+            # Call LLM with retry
             if not self.client:
                 raise ValueError("LLM client not initialized")
             
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.stock_system_prompt},
-                    {"role": "user", "content": alert_text}
-                ],
-                max_tokens=1000,
-                temperature=0.7
-            )
+            report_content = None
+            for attempt in range(3):  # Retry 3 times
+                try:
+                    response = await self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": "你是一位资深的股票分析师，擅长基于具体数据进行市场研判。"},
+                            {"role": "user", "content": prompt}
+                        ],
+                        max_tokens=4096,
+                        temperature=0.7
+                    )
+                    report_content = response.choices[0].message.content
+                    if report_content and len(report_content) > 50:  # Valid content
+                        break
+                    logger.warning(f"Attempt {attempt+1}: Empty or short content, retrying...")
+                    await asyncio.sleep(1)
+                except Exception as e:
+                    logger.error(f"Attempt {attempt+1} failed: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(2)
             
-            report_content = response.choices[0].message.content
-            logger.info(f"Live {market_name} report generated successfully.")
+            # If all retries failed
+            if not report_content:
+                logger.error("All retry attempts failed")
+                raise ValueError("Failed to generate report content after 3 attempts")
+            
+            logger.info(f"Live {market_name} report generated successfully with {len(threshold_stocks)} stocks.")
             
             # Push to channel
             title = f"[AI Analyst] {market_name}实时研报 ({current_time})"
