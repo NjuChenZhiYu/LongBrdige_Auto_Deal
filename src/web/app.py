@@ -347,8 +347,8 @@ def generate_ai_report():
         market_type = request.form.get('market_type', 'US')
         logger.info(f"Manual AI report generation triggered for {market_type} market")
         
-        # Run the report generation
-        asyncio.run(llm_analyst.generate_stock_report(market_type))
+        # Run the report generation with live data
+        asyncio.run(llm_analyst.generate_live_report(market_type))
         
         logger.info(f"AI report for {market_type} generated and sent successfully")
     except Exception as e:

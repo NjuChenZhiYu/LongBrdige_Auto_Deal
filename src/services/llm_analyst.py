@@ -174,6 +174,132 @@ class LLMAnalyst:
                     reason="daily_summary_fallback"
                 )
 
+    async def generate_live_report(self, market_type: str = "US"):
+        """
+        Generate real-time report from live market data (not from recorded signals).
+        This allows manual report generation even when no alerts were triggered.
+        
+        Args:
+            market_type: "US" or "HK"
+        """
+        from src.api.longport.personalized.watchlist import get_watchlist
+        from src.api.longport.client import longport_client
+        
+        market_name = "美股" if market_type == "US" else "港股"
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        try:
+            logger.info(f"Generating live {market_name} report...")
+            
+            # Get watchlist symbols
+            watchlist_items = await get_watchlist()
+            symbols = [item['symbol'] for item in watchlist_items]
+            
+            if not symbols:
+                logger.warning(f"No symbols in watchlist for {market_type}")
+                return
+            
+            # Fetch real-time quotes
+            ctx = await longport_client.get_quote_context()
+            quotes = await ctx.quote(symbols)
+            
+            # Filter stocks with significant changes (>3%)
+            significant_changes = []
+            for q in quotes:
+                prev_close = float(getattr(q, 'prev_close', 0))
+                last_done = float(getattr(q, 'last_done', 0))
+                if prev_close > 0:
+                    change_rate = ((last_done - prev_close) / prev_close) * 100
+                    if abs(change_rate) >= 3.0:  # Lower threshold for report
+                        significant_changes.append({
+                            'symbol': q.symbol,
+                            'last_price': last_done,
+                            'change_rate': change_rate,
+                            'prev_close': prev_close
+                        })
+            
+            # Sort by absolute change rate
+            significant_changes.sort(key=lambda x: abs(x['change_rate']), reverse=True)
+            
+            if not significant_changes:
+                # Even if no significant changes, report top movers
+                all_changes = []
+                for q in quotes:
+                    prev_close = float(getattr(q, 'prev_close', 0))
+                    last_done = float(getattr(q, 'last_done', 0))
+                    if prev_close > 0:
+                        change_rate = ((last_done - prev_close) / prev_close) * 100
+                        all_changes.append({
+                            'symbol': q.symbol,
+                            'last_price': last_done,
+                            'change_rate': change_rate,
+                            'prev_close': prev_close
+                        })
+                all_changes.sort(key=lambda x: abs(x['change_rate']), reverse=True)
+                significant_changes = all_changes[:10]  # Top 10 movers
+            
+            # Build prompt
+            up_count = sum(1 for c in significant_changes if c['change_rate'] > 0)
+            down_count = len(significant_changes) - up_count
+            avg_change = sum(c['change_rate'] for c in significant_changes) / len(significant_changes) if significant_changes else 0
+            
+            alert_text = f"【{market_name}市场实时观察 - {current_time}】\n\n"
+            alert_text += f"**市场整体概况**：\n"
+            alert_text += f"- 监控标的总数：{len(symbols)} 只\n"
+            alert_text += f"- 显著异动标的：{len(significant_changes)} 只\n"
+            alert_text += f"- 上涨家数：{up_count} 只 | 下跌家数：{down_count} 只\n"
+            alert_text += f"- 平均涨跌幅：{avg_change:+.2f}%\n\n"
+            alert_text += f"**重点标的详情**：\n"
+            
+            for i, c in enumerate(significant_changes[:15], 1):
+                symbol = c['symbol']
+                price = c['last_price']
+                change = c['change_rate']
+                direction = "📈上涨" if change > 0 else "📉下跌"
+                alert_text += f"{i}. {symbol}: ${price:.2f}, 涨跌幅 {change:+.2f}%, {direction}\n"
+            
+            # Call LLM
+            if not self.client:
+                raise ValueError("LLM client not initialized")
+            
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.stock_system_prompt},
+                    {"role": "user", "content": alert_text}
+                ],
+                max_tokens=1000,
+                temperature=0.7
+            )
+            
+            report_content = response.choices[0].message.content
+            logger.info(f"Live {market_name} report generated successfully.")
+            
+            # Push to channel
+            title = f"[AI Analyst] {market_name}实时研报 ({current_time})"
+            
+            if market_type == "HK":
+                await FeishuAlert.send_alert(title, report_content)
+            else:
+                await DingTalkAlert.send_alert(
+                    title=title,
+                    content=report_content,
+                    symbol="MARKET_REPORT",
+                    reason="live_analysis"
+                )
+                
+        except Exception as e:
+            logger.error(f"Live report generation failed: {e}")
+            # Send fallback
+            error_msg = f"AI 研报生成失败: {str(e)[:200]}"
+            if market_type == "US":
+                await DingTalkAlert.send_alert(
+                    title=f"[Error] {market_name}研报生成失败",
+                    content=error_msg,
+                    symbol="MARKET_REPORT",
+                    reason="error"
+                )
+
     async def generate_report(self):
         """
         Main entry point for scheduled report generation.
