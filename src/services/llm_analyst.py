@@ -15,11 +15,17 @@ logger = logging.getLogger(__name__)
 
 class LLMAnalyst:
     def __init__(self):
-        self.api_key = Settings.LLM_API_KEY
-        # Default to Kimi API for HK/Futu reports
-        self.base_url = Settings.LLM_BASE_URL or "https://api.moonshot.cn/v1"
-        self.model = Settings.LLM_MODEL or "kimi-k2.5"
-        self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url) if self.api_key else None
+        # US/LongPort Client (Gemini)
+        self.us_api_key = Settings.LLM_API_KEY
+        self.us_base_url = Settings.LLM_BASE_URL
+        self.us_model = Settings.LLM_MODEL
+        self.us_client = AsyncOpenAI(api_key=self.us_api_key, base_url=self.us_base_url) if self.us_api_key else None
+
+        # HK/Futu Client (Kimi)
+        self.hk_api_key = Settings.KIMI_API_KEY
+        self.hk_base_url = Settings.KIMI_LLM_BASE_URL
+        self.hk_model = Settings.KIMI_LLM_MODEL
+        self.hk_client = AsyncOpenAI(api_key=self.hk_api_key, base_url=self.hk_base_url) if self.hk_api_key else None
         
         # Options report system prompt (existing)
         self.options_system_prompt = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
@@ -62,11 +68,11 @@ class LLMAnalyst:
             signal_text += f"{i}. {s['timestamp']} - {s['symbol']} - {s['type']} - Value: {s['value']} (Threshold: {s['threshold']})\n"
 
         try:
-            if not self.client:
-                raise ValueError("LLM client not initialized (missing API Key)")
+            if not self.us_client:
+                raise ValueError("US LLM client not initialized (missing API Key)")
 
-            response = await self.client.chat.completions.create(
-                model=self.model,
+            response = await self.us_client.chat.completions.create(
+                model=self.us_model,
                 messages=[
                     {"role": "system", "content": self.options_system_prompt},
                     {"role": "user", "content": signal_text}
@@ -92,56 +98,35 @@ class LLMAnalyst:
             # Clear signals after report
             signal_recorder.clear_signals()
 
-    async def generate_stock_report(self, market_type: str = "US"):
+    async def generate_longport_us_report(self):
         """
-        Generate daily stock market report using real-time data from watchlist.
+        Generate daily US stock market report using real-time data from LongPort watchlist.
         Fetches watchlist stocks that exceed threshold and generates analysis.
-        
-        Args:
-            market_type: "US" or "HK"
         """
-        market_name = "美股" if market_type == "US" else "港股"
+        market_name = "美股"
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
         
-        # Get threshold from specific market config
+        # Get threshold from US market config
         default_threshold = getattr(Settings, 'PRICE_CHANGE_THRESHOLD', 5.0)
-        threshold = default_threshold
-        
-        if market_type == "US":
-            config = getattr(Settings, 'LONGPORT_SYMBOLS_CONFIG', {})
-            threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
-        elif market_type == "HK":
-            config = getattr(Settings, 'FUTU_SYMBOLS_CONFIG', {})
-            threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
+        config = getattr(Settings, 'LONGPORT_SYMBOLS_CONFIG', {})
+        threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
             
         try:
             logger.info(f"Generating {market_name} report for stocks exceeding {threshold}% threshold...")
             
-            threshold_stocks = []
-            
-            if market_type == "US":
-                # US Market - Use LongPort
-                threshold_stocks = await longport_client.get_threshold_quotes(threshold)
-
-            elif market_type == "HK":
-                # HK Market - Use Futu
-                from src.api.futu.client import futu_client
-                # Run sync method in thread pool to avoid blocking
-                threshold_stocks = await asyncio.to_thread(futu_client.get_threshold_quotes, threshold)
+            # US Market - Use LongPort
+            threshold_stocks = await longport_client.get_threshold_quotes(threshold)
             
             # Sort by absolute change rate (most significant first)
             if threshold_stocks:
                 threshold_stocks.sort(key=lambda x: abs(x['change_rate']), reverse=True)
             
             if not threshold_stocks:
-                logger.info(f"No stocks exceeded {threshold}% threshold for {market_type}")
+                logger.info(f"No stocks exceeded {threshold}% threshold for US")
                 # Send notification that no stocks triggered
                 title = f"[AI Analyst] {market_name}研报 ({current_time})"
                 content = f"当前自选股中无标的涨跌幅超过 {threshold}% 阈值，暂无显著异动。"
-                if market_type == "HK":
-                    await FeishuAlert.send_alert(title, content)
-                else:
-                    await DingTalkAlert.send_alert(title, content, "MARKET_REPORT", "no_trigger")
+                await DingTalkAlert.send_alert(title, content, "MARKET_REPORT", "no_trigger")
                 return
             
             # Calculate stats
@@ -161,30 +146,8 @@ class LLMAnalyst:
                 direction = "上涨" if stock['change_rate'] > 0 else "下跌"
                 alert_text += f"{i}. {stock['symbol']}: 现价 ${stock['last_price']:.2f}, {direction} {stock['change_rate']:+.2f}%\n"
             
-            # Use different prompts for US and HK markets
-            if market_type == "HK":
-                # HK market - use specialized prompt for Kimi
-                prompt = f"""作为资深港股市场分析师，请基于以下港股自选股中**涨跌幅超过 {threshold}% 阈值**的标的列表，生成一份港股投资分析研报。
-
-【数据概览】
-{alert_text}
-
-【研报要求】（严格遵循）
-1. 字数：350-450 字之间，必须完整
-2. 结构：
-   - 市场整体研判：基于涨跌分布判断港股市场情绪（60-80字）
-   - 板块/热点分析：识别板块集中异动特征（80-100字）
-   - 重点个股点评：挑选2-3只最具代表性的港股点评（100-150字）
-   - 南向资金/机构动向分析（可选，50-80字）
-   - 次日展望：投资策略建议或风险提示（70-100字）
-3. 语言：专业、结合港股特色（受美股/A股影响、科技股、金融地产股等）
-4. 格式：Markdown，包含适当的 emoji 增强可读性
-
-请直接输出研报正文，不要包含标题、格式说明或字数标注。"""
-                system_prompt = self.hk_stock_system_prompt
-            else:
-                # US market - use standard prompt
-                prompt = f"""作为专业股票分析师，请基于以下{market_name}自选股中**涨跌幅超过 {threshold}% 阈值**的标的列表，生成一份投资分析研报。
+            # US market - use standard prompt
+            prompt = f"""作为专业股票分析师，请基于以下{market_name}自选股中**涨跌幅超过 {threshold}% 阈值**的标的列表，生成一份投资分析研报。
 
 【数据概览】
 {alert_text}
@@ -200,23 +163,23 @@ class LLMAnalyst:
 4. 重要：必须生成完整内容，在500字内完成所有分析，不要出现未完成的句子
 
 请直接输出研报正文，不要包含标题、格式说明或字数标注。"""
-                system_prompt = "你是一位资深的股票分析师，擅长基于具体数据进行市场研判。"
+            system_prompt = "你是一位资深的股票分析师，擅长基于具体数据进行市场研判。"
 
             # Call LLM with retry
-            if not self.client:
-                raise ValueError("LLM client not initialized")
+            if not self.us_client:
+                raise ValueError("US LLM client not initialized")
             
             report_content = None
             for attempt in range(3):  # Retry 3 times
                 try:
-                    response = await self.client.chat.completions.create(
-                        model=self.model,
+                    response = await self.us_client.chat.completions.create(
+                        model=self.us_model,
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
                         ],
                         max_tokens=2000,
-                        temperature=0.7 if market_type == "HK" else 1.0
+                        temperature=1.0
                     )
                     report_content = response.choices[0].message.content
                     if report_content and len(report_content) > 50:  # Valid content
@@ -238,32 +201,23 @@ class LLMAnalyst:
             # Push to channel
             title = f"[AI Analyst] {market_name}实时研报 ({current_time})"
             
-            if market_type == "HK":
-                await FeishuAlert.send_alert(title, report_content)
-            else:
-                await DingTalkAlert.send_alert(
-                    title=title,
-                    content=report_content,
-                    symbol="MARKET_REPORT",
-                    reason="live_analysis"
-                )
+            await DingTalkAlert.send_alert(
+                title=title,
+                content=report_content,
+                symbol="MARKET_REPORT",
+                reason="live_analysis"
+            )
                 
         except Exception as e:
-            logger.error(f"Stock report generation failed: {e}")
+            logger.error(f"US Stock report generation failed: {e}")
             # Send fallback
             error_msg = f"AI 研报生成失败: {str(e)[:200]}"
-            if market_type == "US":
-                await DingTalkAlert.send_alert(
-                    title=f"[Error] {market_name}研报生成失败",
-                    content=error_msg,
-                    symbol="MARKET_REPORT",
-                    reason="error"
-                )
-            elif market_type == "HK":
-                await FeishuAlert.send_alert(
-                    title=f"[Error] {market_name}研报生成失败",
-                    content=error_msg
-                )
+            await DingTalkAlert.send_alert(
+                title=f"[Error] {market_name}研报生成失败",
+                content=error_msg,
+                symbol="MARKET_REPORT",
+                reason="error"
+            )
 
     async def generate_futu_hk_report(self, threshold: float = None):
         """
@@ -332,21 +286,21 @@ class LLMAnalyst:
 
 【报告要求】
 1. **市场综述**（80-100字）：基于涨跌分布判断港股整体情绪
-2. **板块热点**（80-100字）：识别是否有科技、金融、地产等板块的集中异动
+2. **板块热点**（80-100字）：识别是否有机器人、物流、航天、能源等板块的集中异动
 3. **重点个股**（100-150字）：点评2-3只最具代表性的港股异动
 4. **策略建议**（70-100字）：结合港股通、南向资金等角度给出投资建议
 
 语言要求：专业、简洁、有港股特色，使用 Markdown 格式，字数350-450字。"""
 
-            if not self.client:
-                raise ValueError("LLM client not initialized - please set LLM_API_KEY")
+            if not self.hk_client:
+                raise ValueError("HK LLM client not initialized - please set KIMI_API_KEY")
             
             # Call Kimi API
             report_content = None
             for attempt in range(3):
                 try:
-                    response = await self.client.chat.completions.create(
-                        model=self.model,
+                    response = await self.hk_client.chat.completions.create(
+                        model=self.hk_model,
                         messages=[
                             {"role": "system", "content": self.hk_stock_system_prompt},
                             {"role": "user", "content": prompt}
@@ -390,7 +344,7 @@ class LLMAnalyst:
             logger.error(f"[Kimi/Futu] Failed to generate HK report: {e}")
             # Send error notification
             error_title = f"[Kimi研报] 港股报告生成失败 ({current_time})"
-            error_content = f"❌ **报告生成失败**\n\n错误信息：{str(e)[:200]}\n\n请检查：\n1. LLM_API_KEY 是否配置正确\n2. 富途API连接是否正常\n3. 网络连接状态"
+            error_content = f"❌ **报告生成失败**\n\n错误信息：{str(e)[:200]}\n\n请检查：\n1. KIMI_API_KEY 是否配置正确\n2. 富途API连接是否正常\n3. 网络连接状态"
             await FeishuAlert.send_alert(error_title, error_content)
 
     async def generate_report(self):
@@ -402,8 +356,8 @@ class LLMAnalyst:
         await self.generate_options_report()
         
         # Generate stock reports for both markets
-        await self.generate_stock_report("US")
-        await self.generate_stock_report("HK")
+        await self.generate_longport_us_report()
+        await self.generate_futu_hk_report()
         
         # Clear all recorded data after reports are sent
         signal_recorder.clear_all()

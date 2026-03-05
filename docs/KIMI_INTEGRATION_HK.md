@@ -20,17 +20,24 @@
   - 分析维度：市场综述、板块热点、重点个股、策略建议
   - 自动推送到飞书
 
-- **优化**: `generate_stock_report()` 方法
-  - 美股和港股使用不同的提示词
-  - 港股研报包含港股特色分析（南向资金、板块轮动等）
+- **重构**: `generate_stock_report()` 拆分为独立的市场研报方法
+  - `generate_longport_us_report()`: 使用 Gemini 模型 (LLM_*) 生成美股研报
+  - `generate_futu_hk_report()`: 使用 Kimi 模型 (KIMI_*) 生成港股研报
+  - 消除模型冲突，实现市场隔离
 
 ### 3. 默认配置更新 ✅
 **文件**: `config/settings.py`
 
 ```python
-# 默认使用 Kimi API
-LLM_BASE_URL = "https://api.moonshot.cn/v1"
-LLM_MODEL = "kimi-k2.5"
+# 美股分析 (Gemini)
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-1.5-pro")
+
+# 港股分析 (Kimi)
+KIMI_API_KEY = os.getenv("KIMI_API_KEY")
+KIMI_LLM_BASE_URL = os.getenv("KIMI_LLM_BASE_URL", "https://api.moonshot.cn/v1")
+KIMI_LLM_MODEL = os.getenv("KIMI_LLM_MODEL", "kimi-k2.5")
 ```
 
 ### 4. Web 界面支持 ✅

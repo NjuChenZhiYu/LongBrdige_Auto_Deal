@@ -110,8 +110,8 @@ def scheduled_report_job():
     """Wrapper for scheduled report generation - generates live reports for both markets"""
     logger.info("Running scheduled live report generation...")
     # Generate live reports for both US and HK markets (same as manual button)
-    asyncio.run(llm_analyst.generate_stock_report("US"))
-    asyncio.run(llm_analyst.generate_stock_report("HK"))
+    asyncio.run(llm_analyst.generate_longport_us_report())
+    asyncio.run(llm_analyst.generate_futu_hk_report())
 
 # Scheduler Setup
 scheduler = BackgroundScheduler(timezone=CST_TZ)
@@ -350,7 +350,13 @@ def generate_ai_report():
         logger.info(f"Manual AI report generation triggered for {market_type} market")
         
         # Run the report generation with live data
-        asyncio.run(llm_analyst.generate_stock_report(market_type))
+        if market_type == 'US':
+            asyncio.run(llm_analyst.generate_longport_us_report())
+        elif market_type == 'HK':
+            asyncio.run(llm_analyst.generate_futu_hk_report())
+        else:
+            logger.warning(f"Unknown market type: {market_type}")
+            return redirect(url_for('index'))
         
         logger.info(f"AI report for {market_type} generated and sent successfully")
     except Exception as e:
