@@ -106,22 +106,30 @@ def start_option_monitor():
     t.start()
     logger.info("Option Monitor thread started")
 
-def scheduled_report_job():
-    """Wrapper for scheduled report generation - generates live reports for both markets"""
-    logger.info("Running scheduled live report generation...")
-    # Generate live reports for both US and HK markets (same as manual button)
+def scheduled_us_report_job():
+    """Wrapper for US scheduled report generation"""
+    logger.info("Running scheduled US report generation...")
     asyncio.run(llm_analyst.generate_longport_us_report())
+
+def scheduled_hk_report_job():
+    """Wrapper for HK scheduled report generation"""
+    logger.info("Running scheduled HK report generation...")
     asyncio.run(llm_analyst.generate_futu_hk_report())
 
 # Scheduler Setup
 scheduler = BackgroundScheduler(timezone=CST_TZ)
-# Existing alerts
+# Existing alerts (keep as is or adjust if needed, assuming these are general checks)
 scheduler.add_job(scheduled_job, 'cron', hour=22, minute=50)
 scheduler.add_job(scheduled_job, 'cron', hour=7, minute=50)
 
-# LLM Report
-scheduler.add_job(scheduled_report_job, 'cron', hour=22, minute=50)
-scheduler.add_job(scheduled_report_job, 'cron', hour=7, minute=50)
+# LLM Report Schedules
+# US Market: 22:50 (Pre-market), 07:50 (Post-market)
+scheduler.add_job(scheduled_us_report_job, 'cron', hour=22, minute=50)
+scheduler.add_job(scheduled_us_report_job, 'cron', hour=7, minute=50)
+
+# HK Market: 10:00 (Morning), 15:20 (Afternoon)
+scheduler.add_job(scheduled_hk_report_job, 'cron', hour=10, minute=0)
+scheduler.add_job(scheduled_hk_report_job, 'cron', hour=15, minute=20)
 
 scheduler.start()
 
