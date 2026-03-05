@@ -1,11 +1,15 @@
 """LLM Analyst service for generating daily market reports."""
+"""LLM Analyst service for generating daily market reports."""
 import logging
 import asyncio
+from typing import Optional, Dict, List
 from typing import Optional, Dict, List
 from openai import AsyncOpenAI
 from config.settings import Settings
 from src.services.signal_recorder import signal_recorder
 from src.api.dingtalk import DingTalkAlert
+from src.api.feishu import FeishuAlert
+from datetime import datetime
 from src.api.feishu import FeishuAlert
 from datetime import datetime
 
@@ -18,6 +22,8 @@ class LLMAnalyst:
         self.model = Settings.LLM_MODEL
         self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url) if self.api_key else None
         
+        # Options report system prompt (existing)
+        self.options_system_prompt = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
         # Options report system prompt (existing)
         self.options_system_prompt = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
         请根据这些数据（如 IV 飙升、成交量激增突破 OI 的 20%、Delta 突破 0.5），为我撰写一份专业的市场复盘报告。
@@ -42,18 +48,37 @@ class LLMAnalyst:
         """
 
     async def generate_options_report(self):
+        
+        # Stock market report system prompt (new)
+        self.stock_system_prompt = """你是一位资深的股票市场分析师，擅长宏观经济研判和个股异动分析。
+        我将提供当天触发价格异动告警的股票列表。
+        请基于这些数据撰写一份专业的市场观察日报。
+        要求：
+        1. 市场整体研判：基于涨跌分布和平均涨跌，给出市场整体情绪判断（乐观/谨慎/观望）。
+        2. 板块/热点分析：识别是否有明显的板块集中异动特征。
+        3. 重点个股点评：挑选2-3只异动最剧烈或最具代表性的股票进行简要点评。
+        4. 次日展望：基于当前市场状态，给出简要的投资建议或风险提示。
+        5. 语言风格要专业、有洞察，直接给出结论。
+        6. 使用 Markdown 格式输出，字数控制在 300 字左右。
         """
+
+    async def generate_options_report(self):
+        """
+        Generate options report from daily signals using LLM and push to DingTalk.
         Generate options report from daily signals using LLM and push to DingTalk.
         """
         signals = signal_recorder.get_daily_signals()
         
         if not signals:
             logger.info("No option signals recorded today. Skipping report generation.")
+            logger.info("No option signals recorded today. Skipping report generation.")
             return
 
         logger.info(f"Generating options report for {len(signals)} signals...")
+        logger.info(f"Generating options report for {len(signals)} signals...")
         
         # Format signals for prompt
+        signal_text = "今日期权异动数据:\n"
         signal_text = "今日期权异动数据:\n"
         for i, s in enumerate(signals, 1):
             signal_text += f"{i}. {s['timestamp']} - {s['symbol']} - {s['type']} - Value: {s['value']} (Threshold: {s['threshold']})\n"
@@ -66,6 +91,7 @@ class LLMAnalyst:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": self.options_system_prompt},
+                    {"role": "system", "content": self.options_system_prompt},
                     {"role": "user", "content": signal_text}
                 ],
                 max_tokens=1000,
@@ -73,6 +99,7 @@ class LLMAnalyst:
             )
             
             report_content = response.choices[0].message.content
+            logger.info("Options report generated successfully.")
             logger.info("Options report generated successfully.")
             
             # Push to DingTalk
@@ -85,7 +112,9 @@ class LLMAnalyst:
             
         except Exception as e:
             logger.error(f"LLM options report generation failed: {e}")
+            logger.error(f"LLM options report generation failed: {e}")
         finally:
+            # Clear signals after report
             # Clear signals after report
             signal_recorder.clear_signals()
 
