@@ -179,7 +179,7 @@ class LLMAnalyst:
                             {"role": "user", "content": prompt}
                         ],
                         max_tokens=2000,
-                        temperature=0.7 if market_type == "HK" else 1.0
+                        temperature=1.0
                     )
                     report_content = response.choices[0].message.content
                     if report_content and len(report_content) > 50:  # Valid content
