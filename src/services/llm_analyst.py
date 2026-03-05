@@ -89,9 +89,17 @@ class LLMAnalyst:
         market_name = "美股" if market_type == "US" else "港股"
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
         
-        # Get threshold from settings (default 5%)
-        threshold = getattr(Settings, 'PRICE_CHANGE_THRESHOLD', 5.0)
+        # Get threshold from specific market config
+        default_threshold = getattr(Settings, 'PRICE_CHANGE_THRESHOLD', 5.0)
+        threshold = default_threshold
         
+        if market_type == "US":
+            config = getattr(Settings, 'LONGPORT_SYMBOLS_CONFIG', {})
+            threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
+        elif market_type == "HK":
+            config = getattr(Settings, 'FUTU_SYMBOLS_CONFIG', {})
+            threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
+            
         try:
             logger.info(f"Generating {market_name} report for stocks exceeding {threshold}% threshold...")
             
@@ -170,7 +178,7 @@ class LLMAnalyst:
                             {"role": "user", "content": prompt}
                         ],
                         max_tokens=2000,
-                        temperature=0.7
+                        temperature=1.0
                     )
                     report_content = response.choices[0].message.content
                     if report_content and len(report_content) > 50:  # Valid content
@@ -212,6 +220,11 @@ class LLMAnalyst:
                     content=error_msg,
                     symbol="MARKET_REPORT",
                     reason="error"
+                )
+            elif market_type == "HK":
+                await FeishuAlert.send_alert(
+                    title=f"[Error] {market_name}研报生成失败",
+                    content=error_msg
                 )
 
     async def generate_report(self):

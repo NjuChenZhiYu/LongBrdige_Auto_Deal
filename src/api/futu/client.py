@@ -2,6 +2,7 @@
 import logging
 import pandas as pd
 from futu import OpenQuoteContext, SysConfig
+from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +15,13 @@ class FutuClient:
             cls._instance = super(FutuClient, cls).__new__(cls)
         return cls._instance
 
-    def get_quote_context(self, host="127.0.0.1", port=11111):
+    def get_quote_context(self, host=None, port=None):
         """Get or create OpenQuoteContext singleton"""
+        if host is None:
+            host = Settings.FUTU_HOST
+        if port is None:
+            port = Settings.FUTU_PORT
+            
         if self._quote_ctx is None or not self._quote_ctx.status: # Check if connected
             try:
                 logger.info(f"Initializing Futu OpenQuoteContext at {host}:{port}...")
@@ -72,6 +78,12 @@ class FutuClient:
         Get user's self-selected stocks (User Security) for HK market.
         Returns a list of HK stock codes.
         """
+        # Ensure context is initialized
+        try:
+            self.get_quote_context()
+        except Exception:
+            return []
+
         if not self._quote_ctx:
             logger.error("Futu OpenQuoteContext not initialized")
             return []
@@ -158,6 +170,9 @@ class FutuClient:
                         if prev_close > 0:
                             change_rate = ((last_price - prev_close) / prev_close) * 100
                             
+                            # Debug log for significant changes or all symbols
+                            logger.info(f"Futu Quote: {symbol} Last: {last_price}, Prev: {prev_close}, Change: {change_rate:.2f}% (Threshold: {threshold}%)")
+                            
                             # If threshold is 0, return all; otherwise filter by absolute change
                             if threshold == 0 or abs(change_rate) >= threshold:
                                 threshold_stocks.append({
@@ -166,6 +181,9 @@ class FutuClient:
                                     'change_rate': change_rate,
                                     'prev_close': prev_close
                                 })
+                        else:
+                            logger.warning(f"Futu Quote: {symbol} has invalid prev_close: {prev_close}")
+                            
                     except Exception as e:
                         logger.error(f"Error processing Futu quote for {row.get('code', 'unknown')}: {e}")
                         continue

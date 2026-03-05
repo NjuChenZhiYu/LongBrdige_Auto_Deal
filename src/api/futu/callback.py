@@ -34,8 +34,15 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
             logger.error(f"Futu Quote Callback Error: {str_msg}")
             return
         
-        # logger.info(f"Received quote data for {len(data)} symbols") # Verbose logging
-        
+        try:
+            # Log the first timestamp to verify data freshness
+            if not data.empty:
+                first_time = data.iloc[0].get('data_time') or data.iloc[0].get('time_key')
+                logger.info(f"Received Futu quote data for {len(data)} symbols. Latest time: {first_time}")
+
+        except Exception as e:
+            logger.error(f"Error logging quote data: {e}")
+
         # data is a pandas DataFrame
         try:
             for index, row in data.iterrows():

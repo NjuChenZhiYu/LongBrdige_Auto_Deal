@@ -1,4 +1,3 @@
-from src.api.longport.client import longport_client
 from src.utils.logger import logger
 
 async def get_watchlist():
@@ -12,6 +11,9 @@ async def get_watchlist():
             {"symbol": "US.AAPL", "name": "Apple Inc.", "watchlist_name": "My Watchlist"}
         ]
     """
+    # Import here to avoid circular dependency
+    from src.api.longport.client import longport_client
+    
     try:
         ctx = await longport_client.get_quote_context()
         # Use watchlist() method for v3 SDK
