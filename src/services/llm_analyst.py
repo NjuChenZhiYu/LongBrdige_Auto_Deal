@@ -16,8 +16,9 @@ logger = logging.getLogger(__name__)
 class LLMAnalyst:
     def __init__(self):
         self.api_key = Settings.LLM_API_KEY
-        self.base_url = Settings.LLM_BASE_URL
-        self.model = Settings.LLM_MODEL
+        # Default to Kimi API for HK/Futu reports
+        self.base_url = Settings.LLM_BASE_URL or "https://api.moonshot.cn/v1"
+        self.model = Settings.LLM_MODEL or "kimi-k2.5"
         self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url) if self.api_key else None
         
         # Options report system prompt (existing)
@@ -29,6 +30,19 @@ class LLMAnalyst:
         3. 语言风格要专业、精炼，直接给出结论和潜在的交易风险。
         4. 使用 Markdown 格式输出，字数控制在 300 字以内。
         """
+        
+        # HK Stock report system prompt (optimized for Kimi)
+        self.hk_stock_system_prompt = """你是一位资深的港股市场分析师，擅长港股通、科技股和中资股的异动分析。
+请基于提供的港股数据撰写专业的市场观察日报。
+要求：
+1. 市场整体研判：基于涨跌分布和平均涨跌，判断港股市场情绪（乐观/谨慎/观望/恐慌）。
+2. 板块/热点分析：识别是否有明显的板块集中异动（如科技股、金融股、地产股的集体异动）。
+3. 重点个股点评：挑选2-3只最具代表性的港股进行简要点评，包括代码和名称。
+4. 资金流向：分析是否有明显的南向资金或机构资金动向。
+5. 次日展望：基于当前港股状态，给出简要的投资策略建议或风险提示。
+6. 语言风格：专业、有洞察，结合港股特有的市场环境（如受美股影响、A股联动等）。
+7. 格式：使用 Markdown，字数控制在 350-450 字之间。
+"""
 
     async def generate_options_report(self):
         """
@@ -147,7 +161,30 @@ class LLMAnalyst:
                 direction = "上涨" if stock['change_rate'] > 0 else "下跌"
                 alert_text += f"{i}. {stock['symbol']}: 现价 ${stock['last_price']:.2f}, {direction} {stock['change_rate']:+.2f}%\n"
             
-            prompt = f"""作为专业股票分析师，请基于以下{market_name}自选股中**涨跌幅超过 {threshold}% 阈值**的标的列表，生成一份投资分析研报。
+            # Use different prompts for US and HK markets
+            if market_type == "HK":
+                # HK market - use specialized prompt for Kimi
+                prompt = f"""作为资深港股市场分析师，请基于以下港股自选股中**涨跌幅超过 {threshold}% 阈值**的标的列表，生成一份港股投资分析研报。
+
+【数据概览】
+{alert_text}
+
+【研报要求】（严格遵循）
+1. 字数：350-450 字之间，必须完整
+2. 结构：
+   - 市场整体研判：基于涨跌分布判断港股市场情绪（60-80字）
+   - 板块/热点分析：识别板块集中异动特征（80-100字）
+   - 重点个股点评：挑选2-3只最具代表性的港股点评（100-150字）
+   - 南向资金/机构动向分析（可选，50-80字）
+   - 次日展望：投资策略建议或风险提示（70-100字）
+3. 语言：专业、结合港股特色（受美股/A股影响、科技股、金融地产股等）
+4. 格式：Markdown，包含适当的 emoji 增强可读性
+
+请直接输出研报正文，不要包含标题、格式说明或字数标注。"""
+                system_prompt = self.hk_stock_system_prompt
+            else:
+                # US market - use standard prompt
+                prompt = f"""作为专业股票分析师，请基于以下{market_name}自选股中**涨跌幅超过 {threshold}% 阈值**的标的列表，生成一份投资分析研报。
 
 【数据概览】
 {alert_text}
@@ -163,6 +200,7 @@ class LLMAnalyst:
 4. 重要：必须生成完整内容，在500字内完成所有分析，不要出现未完成的句子
 
 请直接输出研报正文，不要包含标题、格式说明或字数标注。"""
+                system_prompt = "你是一位资深的股票分析师，擅长基于具体数据进行市场研判。"
 
             # Call LLM with retry
             if not self.client:
@@ -174,11 +212,11 @@ class LLMAnalyst:
                     response = await self.client.chat.completions.create(
                         model=self.model,
                         messages=[
-                            {"role": "system", "content": "你是一位资深的股票分析师，擅长基于具体数据进行市场研判。"},
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
                         ],
                         max_tokens=2000,
-                        temperature=1.0
+                        temperature=0.7 if market_type == "HK" else 1.0
                     )
                     report_content = response.choices[0].message.content
                     if report_content and len(report_content) > 50:  # Valid content
@@ -226,6 +264,134 @@ class LLMAnalyst:
                     title=f"[Error] {market_name}研报生成失败",
                     content=error_msg
                 )
+
+    async def generate_futu_hk_report(self, threshold: float = None):
+        """
+        Generate HK market report specifically for Futu data using Kimi.
+        This is the dedicated method for Futu HK stock analysis.
+        
+        Args:
+            threshold: Price change threshold percentage. Uses config default if None.
+        """
+        from src.api.futu.client import futu_client
+        
+        market_name = "港股"
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        # Get threshold from config
+        if threshold is None:
+            default_threshold = getattr(Settings, 'PRICE_CHANGE_THRESHOLD', 5.0)
+            config = getattr(Settings, 'FUTU_SYMBOLS_CONFIG', {})
+            threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
+        
+        try:
+            logger.info(f"[Kimi/Futu] Generating HK report for stocks exceeding {threshold}% threshold...")
+            
+            # Fetch threshold stocks from Futu
+            threshold_stocks = await asyncio.to_thread(futu_client.get_threshold_quotes, threshold)
+            
+            if not threshold_stocks:
+                logger.info(f"[Kimi/Futu] No HK stocks exceeded {threshold}% threshold")
+                title = f"[Kimi研报] 港股市场观察 ({current_time})"
+                content = f"📊 **港股市场观察**\n\n当前富途自选股中无标的涨跌幅超过 **{threshold}%** 阈值，暂无显著异动。\n\n> 监控时间：{current_time}"
+                await FeishuAlert.send_alert(title, content)
+                return
+            
+            # Sort by absolute change rate
+            threshold_stocks.sort(key=lambda x: abs(x['change_rate']), reverse=True)
+            
+            # Calculate stats
+            up_count = sum(1 for s in threshold_stocks if s['change_rate'] > 0)
+            down_count = len(threshold_stocks) - up_count
+            avg_change = sum(s['change_rate'] for s in threshold_stocks) / len(threshold_stocks)
+            
+            # Build stock details with names
+            stock_details = []
+            for i, stock in enumerate(threshold_stocks[:15], 1):
+                symbol = stock.get('symbol', stock.get('code', 'Unknown'))
+                price = stock['last_price']
+                change = stock['change_rate']
+                direction = "📈" if change > 0 else "📉"
+                stock_details.append(f"{i}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}")
+            
+            stocks_text = "\n".join(stock_details)
+            
+            # Build prompt for Kimi
+            prompt = f"""请基于以下港股市场数据，生成一份专业的港股异动观察报告。
+
+【报告时间】{current_time}
+
+【市场整体概况】
+- 异动标的总数：{len(threshold_stocks)} 只
+- 上涨家数：{up_count} 只 | 下跌家数：{down_count} 只
+- 平均涨跌幅：{avg_change:+.2f}%
+- 监控阈值：涨跌幅绝对值 ≥ {threshold}%
+
+【异动标的详情】
+{stocks_text}
+
+【报告要求】
+1. **市场综述**（80-100字）：基于涨跌分布判断港股整体情绪
+2. **板块热点**（80-100字）：识别是否有科技、金融、地产等板块的集中异动
+3. **重点个股**（100-150字）：点评2-3只最具代表性的港股异动
+4. **策略建议**（70-100字）：结合港股通、南向资金等角度给出投资建议
+
+语言要求：专业、简洁、有港股特色，使用 Markdown 格式，字数350-450字。"""
+
+            if not self.client:
+                raise ValueError("LLM client not initialized - please set LLM_API_KEY")
+            
+            # Call Kimi API
+            report_content = None
+            for attempt in range(3):
+                try:
+                    response = await self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": self.hk_stock_system_prompt},
+                            {"role": "user", "content": prompt}
+                        ],
+                        max_tokens=1500,
+                        temperature=0.7
+                    )
+                    report_content = response.choices[0].message.content
+                    if report_content and len(report_content) > 100:
+                        break
+                    logger.warning(f"[Kimi/Futu] Attempt {attempt+1}: Empty or short content, retrying...")
+                    await asyncio.sleep(1)
+                except Exception as e:
+                    logger.error(f"[Kimi/Futu] Attempt {attempt+1} failed: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(2)
+            
+            if not report_content:
+                raise ValueError("Failed to generate report after 3 attempts")
+            
+            logger.info(f"[Kimi/Futu] HK report generated successfully with {len(threshold_stocks)} stocks")
+            
+            # Add header to report
+            full_report = f"""🦞 **Kimi 智能研报** | 港股市场观察 | {current_time}
+
+---
+
+{report_content}
+
+---
+
+📊 **数据统计**：异动{len(threshold_stocks)}只 | 涨{up_count}只 | 跌{down_count}只 | 平均{avg_change:+.2f}%
+🔔 **数据来源**：富途自选股 | **AI模型**：Kimi k2.5"""
+            
+            # Send to Feishu
+            title = f"[Kimi研报] 港股市场观察 ({current_time})"
+            await FeishuAlert.send_alert(title, full_report)
+            logger.info(f"[Kimi/Futu] Report sent to Feishu successfully")
+            
+        except Exception as e:
+            logger.error(f"[Kimi/Futu] Failed to generate HK report: {e}")
+            # Send error notification
+            error_title = f"[Kimi研报] 港股报告生成失败 ({current_time})"
+            error_content = f"❌ **报告生成失败**\n\n错误信息：{str(e)[:200]}\n\n请检查：\n1. LLM_API_KEY 是否配置正确\n2. 富途API连接是否正常\n3. 网络连接状态"
+            await FeishuAlert.send_alert(error_title, error_content)
 
     async def generate_report(self):
         """

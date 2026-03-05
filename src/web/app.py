@@ -357,6 +357,20 @@ def generate_ai_report():
         logger.error(f"AI report generation failed: {e}")
     return redirect(url_for('index'))
 
+@app.route('/generate_futu_kimi_report', methods=['POST'])
+def generate_futu_kimi_report():
+    """Generate Kimi AI analysis report specifically for Futu HK stocks"""
+    try:
+        logger.info("Manual Futu Kimi report generation triggered")
+        
+        # Run the Futu HK report generation using Kimi
+        asyncio.run(llm_analyst.generate_futu_hk_report())
+        
+        logger.info("Futu Kimi report generated and sent successfully")
+    except Exception as e:
+        logger.error(f"Futu Kimi report generation failed: {e}")
+    return redirect(url_for('index'))
+
 @app.route('/sync_watchlist', methods=['POST'])
 def sync_watchlist():
     """Sync symbols.yaml with LongPort Watchlist"""

@@ -109,7 +109,7 @@ class Settings:
     _options_str = os.getenv("MONITOR_OPTIONS", "")
     MONITORED_OPTIONS = [s.strip() for s in _options_str.split(",") if s.strip()]
 
-    # LLM Configuration
+    # LLM Configuration (Default to Kimi/Moonshot for HK/Futu reports)
     LLM_API_KEY = os.getenv("LLM_API_KEY")
-    LLM_BASE_URL = os.getenv("LLM_BASE_URL")
-    LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4-turbo")
+    LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.moonshot.cn/v1")
+    LLM_MODEL = os.getenv("LLM_MODEL", "kimi-k2.5")

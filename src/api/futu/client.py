@@ -175,8 +175,13 @@ class FutuClient:
                             
                             # If threshold is 0, return all; otherwise filter by absolute change
                             if threshold == 0 or abs(change_rate) >= threshold:
+                                # Get stock name from the row
+                                name = row.get('name', '')
+                                display_symbol = f"{symbol} {name}" if name and name != symbol else symbol
                                 threshold_stocks.append({
-                                    'symbol': symbol,
+                                    'symbol': display_symbol,
+                                    'code': symbol,
+                                    'name': name,
                                     'last_price': last_price,
                                     'change_rate': change_rate,
                                     'prev_close': prev_close
