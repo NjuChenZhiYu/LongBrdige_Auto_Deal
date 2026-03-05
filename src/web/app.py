@@ -107,9 +107,11 @@ def start_option_monitor():
     logger.info("Option Monitor thread started")
 
 def scheduled_report_job():
-    """Wrapper for scheduled report generation"""
-    logger.info("Running scheduled report generation...")
-    asyncio.run(llm_analyst.generate_report())
+    """Wrapper for scheduled report generation - generates live reports for both markets"""
+    logger.info("Running scheduled live report generation...")
+    # Generate live reports for both US and HK markets (same as manual button)
+    asyncio.run(llm_analyst.generate_live_report("US"))
+    asyncio.run(llm_analyst.generate_live_report("HK"))
 
 # Scheduler Setup
 scheduler = BackgroundScheduler(timezone=CST_TZ)
@@ -338,6 +340,21 @@ def test_alert():
         logger.info("Test alerts sent.")
     except Exception as e:
         logger.error(f"Test alert failed: {e}")
+    return redirect(url_for('index'))
+
+@app.route('/generate_ai_report', methods=['POST'])
+def generate_ai_report():
+    """Generate AI analysis report for current watchlist stocks"""
+    try:
+        market_type = request.form.get('market_type', 'US')
+        logger.info(f"Manual AI report generation triggered for {market_type} market")
+        
+        # Run the report generation with live data
+        asyncio.run(llm_analyst.generate_live_report(market_type))
+        
+        logger.info(f"AI report for {market_type} generated and sent successfully")
+    except Exception as e:
+        logger.error(f"AI report generation failed: {e}")
     return redirect(url_for('index'))
 
 @app.route('/sync_watchlist', methods=['POST'])
