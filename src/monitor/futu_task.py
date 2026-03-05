@@ -120,6 +120,27 @@ def sync_user_securities():
     except Exception as e:
         logger.error(f"Failed to sync user securities: {e}")
 
+async def poll_snapshot(ctx, symbols, db, interval=30):
+    """
+    Periodically poll market snapshot to ensure data freshness.
+    This serves as a fallback if real-time subscription fails or is delayed.
+    """
+    while True:
+        try:
+            # Sleep first to avoid immediate double fetch (since initial snapshot is done at startup)
+            await asyncio.sleep(interval)
+            
+            logger.info("Polling market snapshot...")
+            # Run sync function in thread pool
+            await asyncio.to_thread(fetch_initial_snapshot, ctx, symbols, db)
+            
+        except asyncio.CancelledError:
+            logger.info("Snapshot polling cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Poll snapshot failed: {e}")
+            await asyncio.sleep(5) # Retry delay
+
 def run_futu_monitor():
     """
     Entry point for Futu monitoring process.
@@ -175,6 +196,11 @@ def run_futu_monitor():
         
         # Keep running the event loop to process alerts
         logger.info("Futu Monitor is running (Press Ctrl+C to stop)")
+        
+        # Start polling task as fallback/primary mechanism
+        if clean_symbols:
+            loop.create_task(poll_snapshot(ctx, clean_symbols, db, interval=30))
+            
         loop.run_forever()
             
     except Exception as e:

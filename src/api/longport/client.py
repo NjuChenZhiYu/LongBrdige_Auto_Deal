@@ -4,6 +4,8 @@ from longport.openapi import Config, AsyncQuoteContext, AsyncTradeContext
 from config.settings import Settings
 from src.utils.logger import logger
 
+from src.api.longport.personalized.watchlist import get_watchlist
+
 class LongPortClient:
     _instance = None
     _quote_ctx = None
@@ -91,6 +93,63 @@ class LongPortClient:
             # but we want to avoid crashing the whole monitor task if one sub fails?
             # Actually, LongPort subscribe usually doesn't fail unless network is down.
             raise e
+
+    async def get_threshold_quotes(self, threshold: float = 0.0) -> list:
+        """
+        Get real-time quotes for US stocks from watchlist that exceed the threshold.
+        
+        Args:
+            threshold (float): Price change percentage threshold. Default 0.0 (return all valid quotes).
+            
+        Returns:
+            list: List of dicts with stock data [{'symbol':..., 'last_price':..., 'change_rate':...}]
+        """
+        try:
+            # Get watchlist symbols (with deduplication)
+            watchlist_items = await get_watchlist()
+            symbols = list(set([item['symbol'] for item in watchlist_items if item['symbol'].endswith(".US")]))
+            
+            if not symbols:
+                logger.warning(f"No US symbols in watchlist")
+                return []
+            
+            # Fetch real-time quotes from LongPort
+            ctx = await self.get_quote_context()
+            quotes = await ctx.quote(symbols)
+            
+            if not quotes:
+                logger.warning(f"No quotes returned for US market")
+                return []
+            
+            # Filter stocks
+            threshold_stocks = []
+            seen_symbols = set()
+            for q in quotes:
+                if q is None: continue
+                symbol = getattr(q, 'symbol', None)
+                if not symbol or symbol in seen_symbols: continue
+                
+                prev_close = float(getattr(q, 'prev_close', 0) or 0)
+                last_done = float(getattr(q, 'last_done', 0) or 0)
+                
+                if prev_close > 0:
+                    change_rate = ((last_done - prev_close) / prev_close) * 100
+                    
+                    # If threshold is 0, return all; otherwise filter by absolute change
+                    if threshold == 0 or abs(change_rate) >= threshold:
+                        threshold_stocks.append({
+                            'symbol': symbol,
+                            'last_price': last_done,
+                            'change_rate': change_rate,
+                            'prev_close': prev_close
+                        })
+                        seen_symbols.add(symbol)
+            
+            return threshold_stocks
+            
+        except Exception as e:
+            logger.error(f"Error fetching LongPort threshold quotes: {e}")
+            return []
 
 # Global client instance
 longport_client = LongPortClient()
