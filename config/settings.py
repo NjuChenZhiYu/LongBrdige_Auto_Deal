@@ -109,7 +109,12 @@ class Settings:
     _options_str = os.getenv("MONITOR_OPTIONS", "")
     MONITORED_OPTIONS = [s.strip() for s in _options_str.split(",") if s.strip()]
 
-    # LLM Configuration
+    # LLM Configuration (Gemini for US)
     LLM_API_KEY = os.getenv("LLM_API_KEY")
-    LLM_BASE_URL = os.getenv("LLM_BASE_URL")
-    LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4-turbo")
+    LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+    LLM_MODEL = os.getenv("LLM_MODEL", "gemini-1.5-pro")
+
+    # Kimi Configuration (Moonshot for HK)
+    KIMI_API_KEY = os.getenv("KIMI_API_KEY")
+    KIMI_LLM_BASE_URL = os.getenv("KIMI_LLM_BASE_URL", "https://api.moonshot.cn/v1")
+    KIMI_LLM_MODEL = os.getenv("KIMI_LLM_MODEL", "kimi-k2.5")
