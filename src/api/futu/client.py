@@ -1,5 +1,6 @@
 
 import logging
+import pandas as pd
 from futu import OpenQuoteContext, SysConfig
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,83 @@ class FutuClient:
             
         except Exception as e:
             logger.error(f"Error getting user security: {e}")
+            return []
+
+    def get_threshold_quotes(self, threshold: float = 0.0) -> list:
+        """
+        Get real-time quotes for HK stocks from watchlist that exceed the threshold.
+        This method is synchronous (blocking) because Futu API is blocking.
+        Callers should use asyncio.to_thread if calling from an async loop.
+        
+        Args:
+            threshold (float): Price change percentage threshold. Default 0.0.
+            
+        Returns:
+            list: List of dicts with stock data [{'symbol':..., 'last_price':..., 'change_rate':...}]
+        """
+        try:
+            # Get HK watchlist from Futu
+            hk_securities = self.get_hk_user_securities("全部")
+            if not hk_securities:
+                logger.warning(f"No HK symbols in watchlist")
+                return []
+
+            # Parse symbols (format is "HK.00700 Name")
+            symbols = [s.split(' ')[0] for s in hk_securities]
+            
+            if not symbols:
+                logger.warning(f"No valid HK symbols found")
+                return []
+
+            # Define blocking function to fetch snapshots (internal helper)
+            def fetch_snapshots(codes):
+                ctx = self.get_quote_context()
+                chunk_size = 200
+                all_frames = []
+                
+                for i in range(0, len(codes), chunk_size):
+                    chunk = codes[i:i+chunk_size]
+                    ret, data = ctx.get_market_snapshot(chunk)
+                    if ret == 0:
+                        all_frames.append(data)
+                    else:
+                        logger.error(f"Futu snapshot error for chunk {i}: {data}")
+                
+                if all_frames:
+                    return pd.concat(all_frames)
+                return None
+
+            # Fetch quotes
+            quotes_df = fetch_snapshots(symbols)
+            
+            threshold_stocks = []
+            
+            if quotes_df is not None and not quotes_df.empty:
+                for _, row in quotes_df.iterrows():
+                    try:
+                        last_price = float(row['last_price'])
+                        prev_close = float(row['prev_close_price'])
+                        symbol = row['code']
+                        
+                        if prev_close > 0:
+                            change_rate = ((last_price - prev_close) / prev_close) * 100
+                            
+                            # If threshold is 0, return all; otherwise filter by absolute change
+                            if threshold == 0 or abs(change_rate) >= threshold:
+                                threshold_stocks.append({
+                                    'symbol': symbol,
+                                    'last_price': last_price,
+                                    'change_rate': change_rate,
+                                    'prev_close': prev_close
+                                })
+                    except Exception as e:
+                        logger.error(f"Error processing Futu quote for {row.get('code', 'unknown')}: {e}")
+                        continue
+                        
+            return threshold_stocks
+
+        except Exception as e:
+            logger.error(f"Error fetching Futu threshold quotes: {e}")
             return []
 
     def close(self):
