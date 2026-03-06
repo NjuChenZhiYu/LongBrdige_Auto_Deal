@@ -4,6 +4,7 @@ import signal
 import sys
 import yaml
 import os
+import fcntl
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from longport.openapi import QuoteContext, PushQuote, SubType
@@ -14,6 +15,23 @@ from src.monitor.quote_monitor import subscribe_watchlist_quote, get_watchlist_s
 from src.api.dingtalk import DingTalkAlert
 
 logger = logging.getLogger(__name__)
+
+# Singleton lock to prevent duplicate processes
+LOCK_FILE = "/tmp/watchlist_monitor.lock"
+
+def ensure_single_instance():
+    """Ensure only one instance of watchlist_monitor is running"""
+    global _lock_fd
+    _lock_fd = open(LOCK_FILE, 'w')
+    try:
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fd.write(str(os.getpid()))
+        _lock_fd.flush()
+        logger.info(f"Singleton lock acquired (PID: {os.getpid()})")
+        return True
+    except IOError:
+        logger.error("Another instance of watchlist_monitor is already running. Exiting.")
+        return False
 
 class WatchlistMonitor:
     def __init__(self):
@@ -208,8 +226,8 @@ class WatchlistMonitor:
                     # Daily cache clear at 05:30 CST (after US market close)
                     # US market closes at 16:00 ET = 05:00+1 CST (冬令时)
                     # Clear at 05:30 to ensure US market has fully closed
-                    if now.hour == 5 and now.minute == 30:
-                         DingTalkAlert.clear_cache()
+                    # if now.hour == 5 and now.minute == 30:
+                    #     pass  # Cache cleared
                          
             except Exception as e:
                 logger.error(f"Monitor service exception: {e}")
@@ -250,13 +268,18 @@ class WatchlistMonitor:
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO, 
+        level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(sys.stdout),
             logging.FileHandler("monitor.log")
         ]
     )
+
+    # Check singleton lock
+    if not ensure_single_instance():
+        sys.exit(1)
+
     monitor = WatchlistMonitor()
     try:
         asyncio.run(monitor.start())
