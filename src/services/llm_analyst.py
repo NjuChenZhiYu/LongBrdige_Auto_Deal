@@ -77,7 +77,7 @@ class LLMAnalyst:
                     {"role": "system", "content": self.options_system_prompt},
                     {"role": "user", "content": signal_text}
                 ],
-                max_tokens=2000,
+                max_tokens=3000,
                 temperature=0.7
             )
             
@@ -182,7 +182,7 @@ class LLMAnalyst:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=3000,  # Increased max_tokens
+                        max_tokens=4000,  # Increased max_tokens
                         temperature=1.0
                     )
                     
@@ -320,7 +320,7 @@ class LLMAnalyst:
                             {"role": "system", "content": self.hk_stock_system_prompt},
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=1500,
+                        max_tokens=4500,
                         temperature=0.7
                     )
                     report_content = response.choices[0].message.content
