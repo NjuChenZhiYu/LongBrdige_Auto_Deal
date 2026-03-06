@@ -40,6 +40,9 @@ function Stop-ServiceProcess {
 # Stop Monitor Service
 Stop-ServiceProcess -PidFile "logs\monitor.pid" -SearchPattern "src.monitor.watchlist_monitor" -ServiceName "Monitor Service"
 
+# Stop Futu Monitor Service
+Stop-ServiceProcess -PidFile "logs\futu_monitor.pid" -SearchPattern "src.monitor.futu_task" -ServiceName "Futu Monitor Service"
+
 # Stop Web Interface
 Stop-ServiceProcess -PidFile "logs\web.pid" -SearchPattern "src\web\app.py" -ServiceName "Web Interface"
 

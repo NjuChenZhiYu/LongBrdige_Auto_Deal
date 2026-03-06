@@ -239,14 +239,14 @@ class LLMAnalyst:
             threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
         
         try:
-            logger.info(f"[Kimi/Futu] Generating HK report for stocks exceeding {threshold}% threshold...")
+            logger.info(f"[Gemini/Futu] Generating HK report for stocks exceeding {threshold}% threshold...")
             
             # Fetch threshold stocks from Futu
             threshold_stocks = await asyncio.to_thread(futu_client.get_threshold_quotes, threshold)
             
             if not threshold_stocks:
-                logger.info(f"[Kimi/Futu] No HK stocks exceeded {threshold}% threshold")
-                title = f"[Kimi研报] 港股市场观察 ({current_time})"
+                logger.info(f"[Gemini/Futu] No HK stocks exceeded {threshold}% threshold")
+                title = f"[Gemini研报] 港股市场观察 ({current_time})"
                 content = f"📊 **港股市场观察**\n\n当前富途自选股中无标的涨跌幅超过 **{threshold}%** 阈值，暂无显著异动。\n\n> 监控时间：{current_time}"
                 await FeishuAlert.send_alert(title, content)
                 return
@@ -270,7 +270,7 @@ class LLMAnalyst:
             
             stocks_text = "\n".join(stock_details)
             
-            # Build prompt for Kimi
+            # Build prompt for Gemini
             prompt = f"""请基于以下港股市场数据，生成一份专业的港股异动观察报告。
 
 【报告时间】{current_time}
@@ -292,15 +292,16 @@ class LLMAnalyst:
 
 语言要求：专业、简洁、有港股特色，使用 Markdown 格式，字数350-450字。"""
 
-            if not self.hk_client:
-                raise ValueError("HK LLM client not initialized - please set KIMI_API_KEY")
+            # Use US Client (Gemini) instead of HK Client (Kimi)
+            if not self.us_client:
+                raise ValueError("US LLM client (Gemini) not initialized")
             
-            # Call Kimi API
+            # Call Gemini API
             report_content = None
             for attempt in range(3):
                 try:
-                    response = await self.hk_client.chat.completions.create(
-                        model=self.hk_model,
+                    response = await self.us_client.chat.completions.create(
+                        model=self.us_model,
                         messages=[
                             {"role": "system", "content": self.hk_stock_system_prompt},
                             {"role": "user", "content": prompt}
@@ -311,20 +312,20 @@ class LLMAnalyst:
                     report_content = response.choices[0].message.content
                     if report_content and len(report_content) > 100:
                         break
-                    logger.warning(f"[Kimi/Futu] Attempt {attempt+1}: Empty or short content, retrying...")
+                    logger.warning(f"[Gemini/Futu] Attempt {attempt+1}: Empty or short content, retrying...")
                     await asyncio.sleep(1)
                 except Exception as e:
-                    logger.error(f"[Kimi/Futu] Attempt {attempt+1} failed: {e}")
+                    logger.error(f"[Gemini/Futu] Attempt {attempt+1} failed: {e}")
                     if attempt < 2:
                         await asyncio.sleep(2)
             
             if not report_content:
                 raise ValueError("Failed to generate report after 3 attempts")
             
-            logger.info(f"[Kimi/Futu] HK report generated successfully with {len(threshold_stocks)} stocks")
+            logger.info(f"[Gemini/Futu] HK report generated successfully with {len(threshold_stocks)} stocks")
             
             # Add header to report
-            full_report = f"""🦞 **Kimi 智能研报** | 港股市场观察 | {current_time}
+            full_report = f"""🦞 **Gemini 智能研报** | 港股市场观察 | {current_time}
 
 ---
 
@@ -333,18 +334,18 @@ class LLMAnalyst:
 ---
 
 📊 **数据统计**：异动{len(threshold_stocks)}只 | 涨{up_count}只 | 跌{down_count}只 | 平均{avg_change:+.2f}%
-🔔 **数据来源**：富途自选股 | **AI模型**：Kimi k2.5"""
+🔔 **数据来源**：富途自选股 | **AI模型**：Gemini"""
             
             # Send to Feishu
-            title = f"[Kimi研报] 港股市场观察 ({current_time})"
+            title = f"[Gemini研报] 港股市场观察 ({current_time})"
             await FeishuAlert.send_alert(title, full_report)
-            logger.info(f"[Kimi/Futu] Report sent to Feishu successfully")
+            logger.info(f"[Gemini/Futu] Report sent to Feishu successfully")
             
         except Exception as e:
-            logger.error(f"[Kimi/Futu] Failed to generate HK report: {e}")
+            logger.error(f"[Gemini/Futu] Failed to generate HK report: {e}")
             # Send error notification
-            error_title = f"[Kimi研报] 港股报告生成失败 ({current_time})"
-            error_content = f"❌ **报告生成失败**\n\n错误信息：{str(e)[:200]}\n\n请检查：\n1. KIMI_API_KEY 是否配置正确\n2. 富途API连接是否正常\n3. 网络连接状态"
+            error_title = f"[Gemini研报] 港股报告生成失败 ({current_time})"
+            error_content = f"❌ **报告生成失败**\n\n错误信息：{str(e)[:200]}\n\n请检查：\n1. LLM_API_KEY (Gemini) 是否配置正确\n2. 富途API连接是否正常\n3. 网络连接状态"
             await FeishuAlert.send_alert(error_title, error_content)
 
     async def generate_report(self):
