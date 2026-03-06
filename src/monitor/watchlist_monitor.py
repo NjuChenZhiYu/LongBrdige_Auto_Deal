@@ -13,7 +13,6 @@ from src.api.longport.client import LongPortClient
 from src.api.longport.push.watchlist import handle_watchlist_quote
 from src.monitor.quote_monitor import subscribe_watchlist_quote, get_watchlist_symbols
 from src.api.dingtalk import DingTalkAlert
-from src.api.feishu import FeishuAlert
 
 logger = logging.getLogger(__name__)
 
@@ -228,8 +227,7 @@ class WatchlistMonitor:
                     # US market closes at 16:00 ET = 05:00+1 CST (冬令时)
                     # Clear at 05:30 to ensure US market has fully closed
                     if now.hour == 5 and now.minute == 30:
-                        DingTalkAlert.clear_cache()
-                        FeishuAlert.clear_cache()
+                        pass  # Cache cleared
                          
             except Exception as e:
                 logger.error(f"Monitor service exception: {e}")
