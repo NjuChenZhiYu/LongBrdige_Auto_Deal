@@ -15,12 +15,16 @@ class FeishuAlert:
     # Alert cache: {title: last_alert_timestamp}
     _alert_cache: Dict[str, float] = {}
     
-    # Deduplication window in seconds (default: 1 hour)
-    DEDUP_WINDOW_SECONDS = 3600
+    # Deduplication window in seconds (default: 0, disabled)
+    DEDUP_WINDOW_SECONDS = 0
     
     @classmethod
     def _should_send_alert(cls, title: str) -> bool:
         """Check if alert should be sent based on deduplication rules"""
+        # If deduplication is disabled (window <= 0), always send
+        if cls.DEDUP_WINDOW_SECONDS <= 0:
+            return True
+
         current_time = time.time()
         
         if title in cls._alert_cache:

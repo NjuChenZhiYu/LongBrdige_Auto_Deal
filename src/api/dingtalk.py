@@ -28,8 +28,8 @@ class DingTalkAlert:
     # Alert cache: {(symbol, reason): last_alert_timestamp}
     _alert_cache: Dict[Tuple[str, str], float] = {}
     
-    # Deduplication window in seconds (default: 1 hour)
-    DEDUP_WINDOW_SECONDS = 3600
+    # Deduplication window in seconds (default: 0, disabled)
+    DEDUP_WINDOW_SECONDS = 0
     
     @classmethod
     def _get_cache_key(cls, symbol: str, reason: str) -> Tuple[str, str]:
@@ -45,6 +45,10 @@ class DingTalkAlert:
         :param reason: Alert reason
         :return: True if alert should be sent, False if it's a duplicate
         """
+        # If deduplication is disabled (window <= 0), always send
+        if cls.DEDUP_WINDOW_SECONDS <= 0:
+            return True
+
         cache_key = cls._get_cache_key(symbol, reason)
         current_time = time.time()
         

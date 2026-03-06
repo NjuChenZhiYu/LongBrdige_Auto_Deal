@@ -226,8 +226,8 @@ class WatchlistMonitor:
                     # Daily cache clear at 05:30 CST (after US market close)
                     # US market closes at 16:00 ET = 05:00+1 CST (冬令时)
                     # Clear at 05:30 to ensure US market has fully closed
-                    if now.hour == 5 and now.minute == 30:
-                        pass  # Cache cleared
+                    # if now.hour == 5 and now.minute == 30:
+                    #     pass  # Cache cleared
                          
             except Exception as e:
                 logger.error(f"Monitor service exception: {e}")
