@@ -1,19 +1,58 @@
 import aiohttp
 import logging
 import json
+import time
+from typing import Dict
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 class FeishuAlert:
-    @staticmethod
-    async def send_alert(title: str, content: str):
+    """
+    Feishu Alert Sender with built-in deduplication.
+    """
+    
+    # Alert cache: {title: last_alert_timestamp}
+    _alert_cache: Dict[str, float] = {}
+    
+    # Deduplication window in seconds (default: 1 hour)
+    DEDUP_WINDOW_SECONDS = 3600
+    
+    @classmethod
+    def _should_send_alert(cls, title: str) -> bool:
+        """Check if alert should be sent based on deduplication rules"""
+        current_time = time.time()
+        
+        if title in cls._alert_cache:
+            last_alert_time = cls._alert_cache[title]
+            time_since_last = current_time - last_alert_time
+            
+            if time_since_last < cls.DEDUP_WINDOW_SECONDS:
+                logger.info(f"Feishu alert deduplicated: {title[:50]}... (last alert {time_since_last:.0f}s ago)")
+                return False
+        
+        cls._alert_cache[title] = current_time
+        return True
+    
+    @classmethod
+    def clear_cache(cls):
+        """Clear the alert cache"""
+        cache_size = len(cls._alert_cache)
+        cls._alert_cache.clear()
+        logger.info(f"Feishu alert cache cleared ({cache_size} entries)")
+    
+    @classmethod
+    async def send_alert(cls, title: str, content: str):
         """
-        Send async alert to Feishu
+        Send async alert to Feishu with deduplication.
         """
         webhook = Settings.FEISHU_WEBHOOK
         if not webhook:
             logger.warning("FEISHU_WEBHOOK not configured")
+            return
+        
+        # Deduplication check
+        if not cls._should_send_alert(title):
             return
 
         # Ensure keyword is present for security verification

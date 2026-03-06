@@ -432,4 +432,5 @@ def remove_symbol():
 
 if __name__ == '__main__':
     # Use 0.0.0.0 to be accessible if needed, port 5001
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    # debug=False to prevent double process spawning from reloader
+    app.run(host='0.0.0.0', port=5001, debug=False)
