@@ -50,6 +50,7 @@ Write-Host "Web Interface started with PID: $($webProcess.Id)"
 
 # Save PIDs
 $monitorProcess.Id | Out-File "logs\monitor.pid" -Encoding ascii
+$futuProcess.Id | Out-File "logs\futu_monitor.pid" -Encoding ascii
 $webProcess.Id | Out-File "logs\web.pid" -Encoding ascii
 
 Write-Host "All services started successfully!"

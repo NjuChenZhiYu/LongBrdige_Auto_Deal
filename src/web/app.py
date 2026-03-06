@@ -123,7 +123,7 @@ scheduler.add_job(scheduled_job, 'cron', hour=22, minute=50)
 scheduler.add_job(scheduled_job, 'cron', hour=7, minute=50)
 
 # LLM Report Schedules
-# US Market: 22:50 (Pre-market), 07:50 (Post-market)
+# US Market: 22:50 (In-market), 07:50 (Post-market)
 scheduler.add_job(scheduled_us_report_job, 'cron', hour=22, minute=50)
 scheduler.add_job(scheduled_us_report_job, 'cron', hour=7, minute=50)
 
