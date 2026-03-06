@@ -170,31 +170,45 @@ class LLMAnalyst:
                 raise ValueError("US LLM client not initialized")
             
             report_content = None
+            # Define valid completion endings
+            valid_endings = ('.', '。', '!', '！', '?', '？', ']', '】', '）')
+            
             for attempt in range(3):  # Retry 3 times
                 try:
+                    logger.info(f"Attempt {attempt+1} to generate US report...")
                     response = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=2000,
+                        max_tokens=3000,  # Increased max_tokens
                         temperature=1.0
                     )
-                    report_content = response.choices[0].message.content
-                    if report_content and len(report_content) > 50:  # Valid content
+                    
+                    # Validate content
+                    content = response.choices[0].message.content.strip() if response.choices else ""
+                    if content and len(content) > 150 and content.endswith(valid_endings):
+                        report_content = content
+                        logger.info(f"Attempt {attempt+1} successful.")
                         break
-                    logger.warning(f"Attempt {attempt+1}: Empty or short content, retrying...")
-                    await asyncio.sleep(1)
+                    
+                    logger.warning(f"Attempt {attempt+1}: Invalid content received (length: {len(content)}, ends with: '{content[-5:]}'). Retrying...")
+                    await asyncio.sleep(2 * (attempt + 1)) # Increase sleep time for each retry
+                    
                 except Exception as e:
-                    logger.error(f"Attempt {attempt+1} failed: {e}")
+                    logger.error(f"Attempt {attempt+1} failed with exception: {e}")
                     if attempt < 2:
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(3 * (attempt + 1)) # Longer sleep on exception
             
             # If all retries failed
             if not report_content:
-                logger.error("All retry attempts failed")
-                raise ValueError("Failed to generate report content after 3 attempts")
+                logger.error("All retry attempts failed to get a valid report.")
+                # Send a specific failure message instead of raising an exception
+                error_msg = f"AI 研报生成失败：模型服务暂时过载或不稳定 (API返回503或内容不完整)。请稍后重试。"
+                title = f"[Error] {market_name}研报生成失败 ({current_time})"
+                await DingTalkAlert.send_alert(title, error_msg, "MARKET_REPORT", "generation_failed")
+                return # Stop execution to avoid sending partial report
             
             logger.info(f"{market_name} report generated successfully with {len(threshold_stocks)} stocks.")
             
