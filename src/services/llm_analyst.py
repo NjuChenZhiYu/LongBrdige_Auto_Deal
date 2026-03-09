@@ -277,15 +277,29 @@ class LLMAnalyst:
             stock_details = []
             for i, stock in enumerate(threshold_stocks[:15], 1):
                 symbol = stock.get('symbol', stock.get('code', 'Unknown'))
+                code = stock.get('code')
                 price = stock['last_price']
                 change = stock['change_rate']
                 direction = "📈" if change > 0 else "📉"
-                stock_details.append(f"{i}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}")
+                
+                # Fetch capital flow data
+                try:
+                    capital_data = await asyncio.to_thread(futu_client.get_capital_flow, code)
+                    flow_label, smart_net, retail_net = futu_client.analyze_capital_flow(capital_data, change)
+                except Exception as e:
+                    logger.error(f"Failed to get capital flow for {code}: {e}")
+                    flow_label, smart_net, retail_net = "分析不可用", 0, 0
+                
+                stock_details.append(
+                    f"{i}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}\n"
+                    f"   - 【内部量化系统研判】：{flow_label}\n"
+                    f"   - (资金支撑：主力净流 {smart_net}万, 散户净流 {retail_net}万)"
+                )
             
             stocks_text = "\n".join(stock_details)
             
             # Build prompt for Gemini
-            prompt = f"""请基于以下港股市场数据，生成一份专业的港股异动观察报告。
+            prompt = f"""你是一个顶级的量化分析师。以下是触发监控阈值的异动香港股票列表及【底层资金流向数据】：
 
 【报告时间】{current_time}
 
@@ -298,11 +312,11 @@ class LLMAnalyst:
 【异动标的详情】
 {stocks_text}
 
-【报告要求】
-1. **市场综述**（80-100字）：基于涨跌分布判断港股整体情绪
-2. **板块热点**（80-100字）：识别是否有机器人、物流、航天、能源等板块的集中异动
-3. **重点个股**（100-150字）：点评2-3只最具代表性的港股异动
-4. **策略建议**（70-100字）：结合港股通、南向资金等角度给出投资建议
+请严格按照以下结构和字数要求，生成一份专业的市场快报：
+1. **市场综述**（80-100字）：基于涨跌分布判断市场整体情绪。
+2. **板块热点**（80-100字）：识别是否有机器人、物流、航天、能源、半导体等板块的集中异动。
+3. **重点个股与资金博弈**（100-150字）：结合系统提供的【内部量化系统研判】标签（如：主力洗盘、机构出逃），深度点评主力和散户的博弈状态，刺穿涨跌幅的表象。
+4. **策略建议**（70-100字）：基于资金流向和宏观基本面，给出冷血、理性的操作建议。
 
 语言要求：专业、简洁、有港股特色，使用 Markdown 格式，字数350-450字。"""
 

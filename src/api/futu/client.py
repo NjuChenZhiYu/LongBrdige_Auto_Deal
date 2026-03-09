@@ -199,6 +199,86 @@ class FutuClient:
             logger.error(f"Error fetching Futu threshold quotes: {e}")
             return []
 
+    def get_capital_flow(self, symbol):
+        """
+        Get capital flow distribution for a stock.
+        """
+        if not self._quote_ctx:
+            return None
+            
+        try:
+            # get_capital_distribution returns (ret, data)
+            ret, data = self._quote_ctx.get_capital_distribution(symbol)
+            if ret == 0:
+                return data
+            else:
+                logger.error(f"Failed to get capital distribution for {symbol}: {data}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting capital distribution for {symbol}: {e}")
+            return None
+
+    def analyze_capital_flow(self, capital_data, current_price_change):
+        """
+        Analyze capital flow to determine market state.
+        Returns: (flow_label, smart_money_net, retail_money_net)
+        """
+        if capital_data is None or capital_data.empty:
+             return "数据缺失", 0, 0
+             
+        try:
+            # Assuming data is a DataFrame with one row
+            row = capital_data.iloc[0]
+            
+            in_super = float(row.get('capital_in_super', 0))
+            in_large = float(row.get('capital_in_large', 0))
+            out_super = float(row.get('capital_out_super', 0))
+            out_large = float(row.get('capital_out_large', 0))
+            
+            in_mid = float(row.get('capital_in_mid', 0))
+            in_small = float(row.get('capital_in_small', 0))
+            out_mid = float(row.get('capital_out_mid', 0))
+            out_small = float(row.get('capital_out_small', 0))
+            
+            # Smart Money Net = (Super In + Large In) - (Super Out + Large Out)
+            smart_net = (in_super + in_large) - (out_super + out_large)
+            
+            # Retail Money Net = (Mid In + Small In) - (Mid Out + Small Out)
+            retail_net = (in_mid + in_small) - (out_mid + out_small)
+            
+            # Convert to Wan (Ten Thousand) for display
+            smart_net_wan = smart_net / 10000
+            retail_net_wan = retail_net / 10000
+            
+            label = "资金博弈不明"
+            
+            # Logic from strategy doc
+            # 1. 【主力洗盘 / 机构吸筹】
+            # Price drop, Smart Net > 0, Retail Net < 0
+            if current_price_change < 0 and smart_net > 0 and retail_net < 0:
+                label = "【主力洗盘 / 机构吸筹】"
+                
+            # 2. 【机构出逃 / 踩踏砸盘】
+            # Price drop, Smart Net < 0
+            elif current_price_change < 0 and smart_net < 0:
+                 label = "【机构出逃 / 踩踏砸盘】"
+                 
+            # 3. 【主力抢筹 / 主升浪】
+            # Price rise, Smart Net > 0
+            elif current_price_change > 0 and smart_net > 0:
+                label = "【主力抢筹 / 主升浪】"
+                
+            # 4. 【散户诱多 / 诱多出货】
+            # Price rise, Smart Net < 0, Retail Net > 0
+            elif current_price_change > 0 and smart_net < 0 and retail_net > 0:
+                label = "【散户诱多 / 诱多出货】"
+            
+            return label, round(smart_net_wan, 2), round(retail_net_wan, 2)
+            
+        except Exception as e:
+            logger.error(f"Error analyzing capital flow: {e}")
+            return "分析错误", 0, 0
+
     def close(self):
         if self._quote_ctx:
             logger.info("Closing Futu OpenQuoteContext...")
