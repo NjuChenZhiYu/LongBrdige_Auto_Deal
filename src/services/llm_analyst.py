@@ -72,17 +72,40 @@ class LLMAnalyst:
             if not self.us_client:
                 raise ValueError("US LLM client not initialized (missing API Key)")
 
-            response = await self.us_client.chat.completions.create(
-                model=self.us_model,
-                messages=[
-                    {"role": "system", "content": self.options_system_prompt},
-                    {"role": "user", "content": signal_text}
-                ],
-                max_tokens=3000,
-                temperature=0.7
-            )
+            report_content = ""
+            for attempt in range(3):
+                try:
+                    stream = await self.us_client.chat.completions.create(
+                        model=self.us_model,
+                        messages=[
+                            {"role": "system", "content": self.options_system_prompt},
+                            {"role": "user", "content": signal_text}
+                        ],
+                        max_tokens=3000,
+                        temperature=0.7,
+                        stream=True
+                    )
+                    
+                    full_content = ""
+                    async for chunk in stream:
+                        content = chunk.choices[0].delta.content
+                        if content:
+                            full_content += content
+                    
+                    report_content = full_content
+                    if report_content and len(report_content) > 50:
+                        break
+                    
+                    logger.warning(f"[Gemini/Options] Attempt {attempt+1}: Empty or short content, retrying...")
+                    await asyncio.sleep(1)
+                except Exception as e:
+                    logger.error(f"[Gemini/Options] Attempt {attempt+1} failed: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(2)
+
+            if not report_content:
+                raise ValueError("Failed to generate options report after 3 attempts")
             
-            report_content = response.choices[0].message.content
             logger.info("Options report generated successfully.")
             
             # Push to DingTalk
@@ -198,18 +221,25 @@ class LLMAnalyst:
             for attempt in range(3):  # Retry 3 times
                 try:
                     logger.info(f"Attempt {attempt+1} to generate US report...")
-                    response = await self.us_client.chat.completions.create(
+                    stream = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
                         ],
                         max_tokens=4000,  # Increased max_tokens
-                        temperature=1.0
+                        temperature=1.0,
+                        stream=True
                     )
                     
+                    full_content = ""
+                    async for chunk in stream:
+                        content = chunk.choices[0].delta.content
+                        if content:
+                            full_content += content
+                    
                     # Validate content
-                    content = response.choices[0].message.content.strip() if response.choices else ""
+                    content = full_content.strip()
                     if content and len(content) > 150 and content.endswith(valid_endings):
                         report_content = content
                         logger.info(f"Attempt {attempt+1} successful.")
@@ -387,23 +417,32 @@ class LLMAnalyst:
             if not self.us_client:
                 raise ValueError("US LLM client (Gemini) not initialized")
             
-            # Call Gemini API
-            report_content = None
+            # Call Gemini API with streaming
+            report_content = ""
             for attempt in range(3):
                 try:
-                    response = await self.us_client.chat.completions.create(
+                    stream = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
                             {"role": "system", "content": self.hk_stock_system_prompt},
                             {"role": "user", "content": prompt}
                         ],
                         max_tokens=4500,
-                        temperature=0.7
+                        temperature=0.7,
+                        stream=True
                     )
-                    report_content = response.choices[0].message.content
+                    
+                    full_content = ""
+                    async for chunk in stream:
+                        content = chunk.choices[0].delta.content
+                        if content:
+                            full_content += content
+                            
+                    report_content = full_content
                     if report_content and len(report_content) > 100:
                         break
-                    logger.warning(f"[Gemini/Futu] Attempt {attempt+1}: Empty or short content, retrying...")
+                    
+                    logger.warning(f"[Gemini/Futu] Attempt {attempt+1}: Empty or short content ({len(report_content) if report_content else 0} chars), retrying...")
                     await asyncio.sleep(1)
                 except Exception as e:
                     logger.error(f"[Gemini/Futu] Attempt {attempt+1} failed: {e}")
