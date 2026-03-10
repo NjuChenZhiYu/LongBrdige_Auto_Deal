@@ -10,6 +10,7 @@ from src.api.feishu import FeishuAlert
 from datetime import datetime
 from src.api.longport.personalized.watchlist import get_watchlist
 from src.api.longport.client import longport_client
+from src.storage import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +99,14 @@ class LLMAnalyst:
             # Clear signals after report
             signal_recorder.clear_signals()
 
-    async def generate_longport_us_report(self):
+    async def generate_longport_us_report(self, save_to_db: bool = False, trigger_type: str = 'CRON'):
         """
         Generate daily US stock market report using real-time data from LongPort watchlist.
         Fetches watchlist stocks that exceed threshold and generates analysis.
         """
         market_name = "美股"
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        today_date = datetime.now().strftime("%Y-%m-%d")
         
         # Get threshold from US market config
         default_threshold = getattr(Settings, 'PRICE_CHANGE_THRESHOLD', 5.0)
@@ -127,8 +129,28 @@ class LLMAnalyst:
                 title = f"[AI Analyst] {market_name}研报 ({current_time})"
                 content = f"当前自选股中无标的涨跌幅超过 {threshold}% 阈值，暂无显著异动。"
                 await DingTalkAlert.send_alert(title, content, "MARKET_REPORT", "no_trigger")
+                
+                # Still record empty report if triggered manually or at specific time? 
+                # Spec says "daily_reports -> Append". Maybe skip if empty content?
+                # But for anomaly_stocks, nothing to save.
                 return
             
+            # Save anomaly stocks if requested
+            if save_to_db:
+                for stock in threshold_stocks:
+                    db_manager.upsert_anomaly_stock(
+                        report_date=today_date,
+                        market='US',
+                        symbol=stock['symbol'],
+                        name=stock.get('name', ''),
+                        price=stock['last_price'],
+                        change_pct=stock['change_rate'],
+                        flow_label=None, # Not available for US yet
+                        smart_net=0.0,
+                        retail_net=0.0
+                    )
+                logger.info(f"Saved {len(threshold_stocks)} anomaly stocks to DB.")
+
             # Calculate stats
             up_count = sum(1 for s in threshold_stocks if s['change_rate'] > 0)
             down_count = len(threshold_stocks) - up_count
@@ -221,6 +243,16 @@ class LLMAnalyst:
                 symbol="MARKET_REPORT",
                 reason="live_analysis"
             )
+
+            # Save report to DB if requested
+            if save_to_db and report_content:
+                db_manager.append_daily_report(
+                    report_date=today_date,
+                    market='US',
+                    trigger_type=trigger_type,
+                    report_content=report_content
+                )
+                logger.info("Saved US daily report to DB.")
                 
         except Exception as e:
             logger.error(f"US Stock report generation failed: {e}")
@@ -233,7 +265,7 @@ class LLMAnalyst:
                 reason="error"
             )
 
-    async def generate_futu_hk_report(self, threshold: float = None):
+    async def generate_futu_hk_report(self, threshold: float = None, save_to_db: bool = False, trigger_type: str = 'CRON'):
         """
         Generate HK market report specifically for Futu data using Kimi.
         This is the dedicated method for Futu HK stock analysis.
@@ -245,6 +277,7 @@ class LLMAnalyst:
         
         market_name = "港股"
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        today_date = datetime.now().strftime("%Y-%m-%d")
         
         # Get threshold from config
         if threshold is None:
@@ -275,6 +308,8 @@ class LLMAnalyst:
             
             # Build stock details with names
             stock_details = []
+            stocks_to_save = []
+            
             for i, stock in enumerate(threshold_stocks[:15], 1):
                 symbol = stock.get('symbol', stock.get('code', 'Unknown'))
                 code = stock.get('code')
@@ -290,12 +325,40 @@ class LLMAnalyst:
                     logger.error(f"Failed to get capital flow for {code}: {e}")
                     flow_label, smart_net, retail_net = "分析不可用", 0, 0
                 
+                if save_to_db:
+                    stocks_to_save.append({
+                        'report_date': today_date,
+                        'market': 'HK',
+                        'symbol': code,
+                        'name': stock.get('name', ''),
+                        'price': price,
+                        'change_pct': change,
+                        'flow_label': flow_label,
+                        'smart_net': smart_net,
+                        'retail_net': retail_net
+                    })
+
                 stock_details.append(
                     f"{i}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}\n"
                     f"   - 【内部量化系统研判】：{flow_label}\n"
                     f"   - (资金支撑：主力净流 {smart_net}万, 散户净流 {retail_net}万)"
                 )
             
+            if save_to_db:
+                for s in stocks_to_save:
+                    db_manager.upsert_anomaly_stock(
+                        report_date=s['report_date'],
+                        market=s['market'],
+                        symbol=s['symbol'],
+                        name=s['name'],
+                        price=s['price'],
+                        change_pct=s['change_pct'],
+                        flow_label=s['flow_label'],
+                        smart_net=s['smart_net'],
+                        retail_net=s['retail_net']
+                    )
+                logger.info(f"Saved {len(stocks_to_save)} HK anomaly stocks to DB.")
+
             stocks_text = "\n".join(stock_details)
             
             # Build prompt for Gemini
@@ -369,6 +432,16 @@ class LLMAnalyst:
             await FeishuAlert.send_alert(title, full_report)
             logger.info(f"[Gemini/Futu] Report sent to Feishu successfully")
             
+            # Save report content
+            if save_to_db and report_content:
+                db_manager.append_daily_report(
+                    report_date=today_date,
+                    market='HK',
+                    trigger_type=trigger_type,
+                    report_content=report_content
+                )
+                logger.info(f"Saved HK daily report to DB.")
+                
         except Exception as e:
             logger.error(f"[Gemini/Futu] Failed to generate HK report: {e}")
             # Send error notification
