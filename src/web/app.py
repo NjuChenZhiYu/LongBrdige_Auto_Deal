@@ -12,6 +12,7 @@ from src.api.longport.push.watchlist import handle_watchlist_quote
 from longport.openapi import SubType
 from tinydb import TinyDB, Query
 from src.api.notification import AlertManager
+from src.storage import db_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -106,30 +107,30 @@ def start_option_monitor():
     t.start()
     logger.info("Option Monitor thread started")
 
-def scheduled_us_report_job():
+def scheduled_us_report_job(save_to_db=False):
     """Wrapper for US scheduled report generation"""
-    logger.info("Running scheduled US report generation...")
-    asyncio.run(llm_analyst.generate_longport_us_report())
+    logger.info(f"Running scheduled US report generation (save_to_db={save_to_db})...")
+    asyncio.run(llm_analyst.generate_longport_us_report(save_to_db=save_to_db, trigger_type='CRON'))
 
-def scheduled_hk_report_job():
+def scheduled_hk_report_job(save_to_db=False):
     """Wrapper for HK scheduled report generation"""
-    logger.info("Running scheduled HK report generation...")
-    asyncio.run(llm_analyst.generate_futu_hk_report())
+    logger.info(f"Running scheduled HK report generation (save_to_db={save_to_db})...")
+    asyncio.run(llm_analyst.generate_futu_hk_report(save_to_db=save_to_db, trigger_type='CRON'))
 
 # Scheduler Setup
 scheduler = BackgroundScheduler(timezone=CST_TZ)
 # Existing alerts (keep as is or adjust if needed, assuming these are general checks)
-scheduler.add_job(scheduled_job, 'cron', hour=22, minute=50)
-scheduler.add_job(scheduled_job, 'cron', hour=7, minute=50)
+# scheduler.add_job(scheduled_job, 'cron', hour=22, minute=50)
+# scheduler.add_job(scheduled_job, 'cron', hour=7, minute=50)
 
 # LLM Report Schedules
-# US Market: 22:50 (In-market), 07:50 (Post-market)
-scheduler.add_job(scheduled_us_report_job, 'cron', hour=22, minute=50)
-scheduler.add_job(scheduled_us_report_job, 'cron', hour=7, minute=50)
+# US Market: 22:50 (In-market, No Save), 07:50 (Post-market, Save)
+scheduler.add_job(scheduled_us_report_job, 'cron', hour=22, minute=50, kwargs={'save_to_db': False})
+scheduler.add_job(scheduled_us_report_job, 'cron', hour=7, minute=50, kwargs={'save_to_db': True})
 
-# HK Market: 10:00 (Morning), 15:20 (Afternoon)
-scheduler.add_job(scheduled_hk_report_job, 'cron', hour=10, minute=0)
-scheduler.add_job(scheduled_hk_report_job, 'cron', hour=15, minute=20)
+# HK Market: 10:00 (Morning, No Save), 15:20 (Afternoon, Save)
+scheduler.add_job(scheduled_hk_report_job, 'cron', hour=10, minute=0, kwargs={'save_to_db': False})
+scheduler.add_job(scheduled_hk_report_job, 'cron', hour=15, minute=20, kwargs={'save_to_db': True})
 
 scheduler.start()
 
@@ -224,6 +225,54 @@ async def index():
 @app.route('/api/futu/quotes')
 def api_futu_quotes():
     return jsonify(get_futu_quotes())
+
+@app.route('/api/reports', methods=['GET'])
+def get_reports():
+    """Get reports with pagination."""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        reports = db_manager.get_reports(page=page, per_page=per_page)
+        return jsonify(reports)
+    except Exception as e:
+        logger.error(f"Error fetching reports: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/reports/<int:report_id>', methods=['DELETE'])
+def delete_report(report_id):
+    """Delete a report by ID."""
+    try:
+        success = db_manager.delete_report(report_id)
+        if success:
+            return jsonify({'status': 'success'}), 200
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to delete report'}), 500
+    except Exception as e:
+        logger.error(f"Error deleting report {report_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/reports/trigger/us', methods=['POST'])
+async def trigger_us_report():
+    """Manually trigger US report generation."""
+    try:
+        # Run in background or wait? 
+        # Since it's an async route, we can await it, but it might take time.
+        # For better UX, we might want to return immediately, but for simplicity/feedback let's await.
+        await llm_analyst.generate_longport_us_report(save_to_db=True, trigger_type='MANUAL')
+        return jsonify({'status': 'success', 'message': 'US report generated and saved.'}), 200
+    except Exception as e:
+        logger.error(f"Error triggering US report: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/reports/trigger/hk', methods=['POST'])
+async def trigger_hk_report():
+    """Manually trigger HK report generation."""
+    try:
+        await llm_analyst.generate_futu_hk_report(save_to_db=True, trigger_type='MANUAL')
+        return jsonify({'status': 'success', 'message': 'HK report generated and saved.'}), 200
+    except Exception as e:
+        logger.error(f"Error triggering HK report: {e}")
+        return jsonify({'error': str(e)}), 500
 
 from src.api.futu.client import futu_client
 from src.monitor.utils import handle_quote_alert
