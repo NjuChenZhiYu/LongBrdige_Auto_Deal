@@ -4,7 +4,7 @@ import signal
 import sys
 import yaml
 import os
-import fcntl
+import tempfile
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from longport.openapi import QuoteContext, PushQuote, SubType
@@ -17,24 +17,44 @@ from src.api.dingtalk import DingTalkAlert
 logger = logging.getLogger(__name__)
 
 # Singleton lock to prevent duplicate processes
-LOCK_FILE = "/tmp/watchlist_monitor.lock"
+LOCK_FILE = os.path.join(tempfile.gettempdir(), "us_watchlist_monitor.lock")
 
 def ensure_single_instance():
-    """Ensure only one instance of watchlist_monitor is running"""
-    global _lock_fd
-    _lock_fd = open(LOCK_FILE, 'w')
-    try:
-        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _lock_fd.write(str(os.getpid()))
-        _lock_fd.flush()
-        logger.info(f"Singleton lock acquired (PID: {os.getpid()})")
-        return True
-    except IOError:
-        logger.error("Another instance of watchlist_monitor is already running. Exiting.")
-        return False
+    """Ensure only one instance of us_watchlist_monitor is running"""
+    if os.name == 'nt':
+        # Windows implementation using msvcrt
+        import msvcrt
+        global _lock_fd
+        _lock_fd = open(LOCK_FILE, 'w')
+        try:
+            msvcrt.locking(_lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+            _lock_fd.write(str(os.getpid()))
+            _lock_fd.flush()
+            logger.info(f"Singleton lock acquired (PID: {os.getpid()})")
+            return True
+        except (IOError, OSError):
+            logger.error("Another instance of us_watchlist_monitor is already running. Exiting.")
+            return False
+    else:
+        # Unix implementation using fcntl
+        import fcntl
+        global _lock_fd_unix
+        _lock_fd_unix = open(LOCK_FILE, 'w')
+        try:
+            fcntl.flock(_lock_fd_unix, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_fd_unix.write(str(os.getpid()))
+            _lock_fd_unix.flush()
+            logger.info(f"Singleton lock acquired (PID: {os.getpid()})")
+            return True
+        except IOError:
+            logger.error("Another instance of us_watchlist_monitor is already running. Exiting.")
+            return False
 
-class WatchlistMonitor:
+from src.monitor.base_monitor import BaseMonitor
+
+class USWatchlistMonitor(BaseMonitor):
     def __init__(self):
+        super().__init__()
         self.running = False
         self.ctx: Optional[QuoteContext] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -88,7 +108,13 @@ class WatchlistMonitor:
                 logger.warning(f"No cached prev_close for {symbol}, using event data")
             
             # Check if event is valid PushQuote
-            triggered, alert_data = await handle_watchlist_quote(symbol, wrapped_event, self.threshold_config)
+            # Real-time alerts disabled per docs/notification_rule.md to prevent spam
+            triggered, alert_data = await handle_watchlist_quote(
+                symbol, 
+                wrapped_event, 
+                self.threshold_config,
+                send_alert=False
+            )
             if triggered:
                 logger.info(f"🚨 Alert triggered for {symbol}: {alert_data}")
                 # Note: DingTalk alert is already sent by handle_watchlist_quote, no need to send again here
@@ -280,7 +306,7 @@ if __name__ == "__main__":
     if not ensure_single_instance():
         sys.exit(1)
 
-    monitor = WatchlistMonitor()
+    monitor = USWatchlistMonitor()
     try:
         asyncio.run(monitor.start())
     except KeyboardInterrupt:

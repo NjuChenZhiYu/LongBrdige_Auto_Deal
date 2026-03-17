@@ -1,8 +1,20 @@
 import os
+import time
 import yaml
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
+
+# Redirect Futu logs to local logs directory (must be before importing futu)
+# This fixes PermissionError on Windows AppData
+futu_log_dir = os.path.join(os.getcwd(), "logs", "futu_appdata")
+if not os.path.exists(futu_log_dir):
+    try:
+        os.makedirs(futu_log_dir)
+    except:
+        pass
+os.environ["appdata"] = futu_log_dir
+
 
 # Redirect Futu logs to local logs directory (must be before importing futu)
 # This fixes PermissionError on Windows AppData
@@ -57,12 +69,12 @@ def save_futu_config(config):
     with open(FUTU_CONFIG_PATH, 'w', encoding='utf-8') as f:
         yaml.dump(config, f, allow_unicode=True)
 
-async def check_and_alert(send_alert: bool = False):
+async def check_us_alert(send_alert: bool = False):
     """
     Check all monitored stocks and send alerts if thresholds are met.
     This function is used by both manual trigger and scheduled tasks.
     """
-    logger.info(f"Starting check_and_alert (send_alert={send_alert})...")
+    logger.info(f"Starting check_us_alert (send_alert={send_alert})...")
     try:
         config = load_config()
         symbols = config.get('symbols', [])
@@ -99,7 +111,7 @@ async def check_and_alert(send_alert: bool = False):
 def scheduled_job():
     """Wrapper for scheduled task to run async code"""
     logger.info("Running scheduled alert check...")
-    asyncio.run(check_and_alert(send_alert=True))
+    asyncio.run(check_us_alert(send_alert=True))
 
 import threading
 from src.monitor.option_monitor import option_monitor
@@ -195,15 +207,26 @@ async def get_longport_data(configured_symbols):
         return [{'symbol': s, 'name': s, 'price': 0, 'change_rate': 0} for s in configured_symbols]
 
 def get_futu_quotes():
-    """Fetch Futu quotes from TinyDB"""
-    try:
-        db = TinyDB(FUTU_DB_PATH)
-        quotes = db.all()
-        db.close()
-        return quotes
-    except Exception as e:
-        logger.error(f"Error reading Futu DB: {e}")
-        return []
+    """Fetch Futu quotes from TinyDB with retries for Windows file locking"""
+    retries = 3
+    last_error = None
+    
+    for i in range(retries):
+        try:
+            if os.path.exists(FUTU_DB_PATH):
+                mtime = os.path.getmtime(FUTU_DB_PATH)
+                # logger.debug(f"Reading Futu DB. Last modified: {datetime.fromtimestamp(mtime)}")
+            
+            db = TinyDB(FUTU_DB_PATH)
+            quotes = db.all()
+            db.close()
+            return quotes
+        except Exception as e:
+            last_error = e
+            time.sleep(0.1) # Wait 100ms and retry
+            
+    logger.error(f"Error reading Futu DB after {retries} attempts: {last_error}")
+    return []
 
 @app.route('/')
 async def index():
@@ -300,7 +323,7 @@ async def trigger_hk_report():
         return jsonify({'error': str(e)}), 500
 
 from src.api.futu.client import futu_client
-from src.monitor.utils import handle_quote_alert
+from src.monitor.hk_watchlist_monitor import HKWatchlistMonitor
 
 @app.route('/update_futu_thresholds', methods=['POST'])
 def update_futu_thresholds():
@@ -359,7 +382,7 @@ async def check_futu_alerts(send_alert=False):
         # Calculate approximate turnover (volume * price)
         turnover = volume * last_price if volume and last_price else 0
         
-        triggered, _ = await handle_quote_alert(
+        triggered, _ = await HKWatchlistMonitor.handle_quote_alert(
             symbol=symbol, 
             last_price=last_price, 
             prev_close=prev_close, 
@@ -403,50 +426,10 @@ def update_thresholds():
 def trigger_check():
     """Manual trigger to check current prices against thresholds and send alerts if matched"""
     try:
-        asyncio.run(check_and_alert(send_alert=True))
+        asyncio.run(check_us_alert(send_alert=True))
     except Exception as e:
         print(f"Trigger check failed: {e}")
 
-    return redirect(url_for('index'))
-
-@app.route('/test_alert', methods=['POST'])
-def test_alert():
-    """Send test alerts to verify configuration"""
-    try:
-        # Test DingTalk (US Market default)
-        AlertManager.send_dingtalk("Test Alert (DingTalk): This is a test message to verify DingTalk configuration.")
-        
-        # Test Feishu (HK Market default)
-        AlertManager.send_feishu("This is a test message to verify Feishu configuration.", title="Test Alert (Feishu)")
-        
-        logger.info("Test alerts sent.")
-    except Exception as e:
-        logger.error(f"Test alert failed: {e}")
-    return redirect(url_for('index'))
-
-@app.route('/generate_ai_report', methods=['POST'])
-def generate_ai_report():
-    """Generate AI analysis report for current watchlist stocks"""
-    try:
-        market_type = request.form.get('market_type', 'US')
-        logger.info(f"Manual AI report generation triggered for {market_type} market")
-        
-        # Run the report generation with live data
-        if market_type == 'US':
-            asyncio.run(llm_analyst.generate_longport_us_report())
-            return redirect(url_for('index'))
-        elif market_type == 'HK':
-            asyncio.run(llm_analyst.generate_futu_hk_report())
-            return redirect(url_for('hk_market'))
-        else:
-            logger.warning(f"Unknown market type: {market_type}")
-            return redirect(url_for('index'))
-        
-        logger.info(f"AI report for {market_type} generated and sent successfully")
-    except Exception as e:
-        logger.error(f"AI report generation failed: {e}")
-        # Default redirect if error or unknown path, though we return early above
-        return redirect(url_for('index'))
     return redirect(url_for('index'))
 
 @app.route('/generate_futu_kimi_report', methods=['POST'])

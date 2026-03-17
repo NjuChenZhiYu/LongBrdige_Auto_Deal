@@ -209,6 +209,50 @@ DINGTALK_RETRY_TIMES=3
 DINGTALK_RETRY_INTERVAL=1
 ```
 
+## 2.7 富途行情数据获取与实时同步方案 (Futu Market Data)
+
+针对港股市场（HK Market），采用 **"初始快照 + 实时增量推送"** 的混合模式，结合 TinyDB 作为即时数据缓存（Broker），解决富途 OpenD 接口特性带来的数据完整性问题。
+
+### 2.7.1 核心架构
+```mermaid
+flowchart TD
+    A[HKMonitor 启动] --> B[连接 Futu OpenD]
+    B --> C[拉取用户自选股]
+    C --> D[订阅 SubType.QUOTE]
+    D --> E[**Step 1: 初始快照**]
+    E -->|get_market_snapshot| F[(TinyDB Cache)]
+    F --> G[**Step 2: 实时推送**]
+    D -->|on_recv_rsp| H[FutuQuoteCallback]
+    H -->|**Lock Protection**| F
+    F -->|Read JSON| I[Web 前端展示]
+```
+
+### 2.7.2 详细同步流程
+
+1.  **初始化快照 (Initial Snapshot)**:
+    *   **触发时机**：服务启动或重连时，由 `HKWatchlistMonitor.start()` 触发。
+    *   **操作**：调用 `ctx.get_market_snapshot(symbols)` 拉取一次全量快照。
+    *   **目的**：获取完整的静态字段（特别是 `name` 股票名称、`prev_close` 昨收价）。富途的实时推送为了优化带宽，往往只包含变化的字段（如最新价），不包含名称，若不拉快照会导致前端显示名称缺失。
+    *   **存储**：将完整数据写入 `data/futu_quotes.json`。
+
+2.  **实时订阅 (Real-time Subscription)**:
+    *   **操作**：调用 `ctx.subscribe(symbols, [SubType.QUOTE])`。
+    *   **机制**：建立长连接，监听服务端推送。
+
+3.  **增量更新与并发控制 (Incremental Update & Concurrency Control)**:
+    *   **回调处理**：`FutuQuoteCallback.on_recv_rsp` 接收毫秒级行情推送。
+    *   **数据融合**：
+        *   回调收到的数据（通常仅含 `last_price`, `volume`, `time`）会自动与 TinyDB 中已存在的记录（含 `name`, `prev_close`）进行合并。
+        *   **动态计算**：实时涨跌幅 = `(current_price - prev_close) / prev_close`。若推送包中无 `prev_close`，则自动从 DB 读取之前的快照值进行计算。
+    *   **线程安全 (关键设计)**：
+        *   问题：TinyDB 非线程安全。启动线程（写快照）与回调线程（写实时数据）若同时操作会造成 JSON 文件损坏。
+        *   解决：引入 **`threading.Lock`** (在 `HKWatchlistMonitor` 初始化并共享给 `Callback`)。
+        *   实现：所有对 `TinyDB` 的读写操作（`upsert`, `get`）均强制在 `with self.db_lock:` 保护下执行。
+
+4.  **前端解耦 (Frontend Integration)**:
+    *   Web 端 (`app.py`) 不直接连接富途 API，而是读取 `data/futu_quotes.json`。
+    *   这种设计实现了**读写分离**：Monitor 负责高频写入，Web 负责按需读取，互不阻塞。
+
 ## 3 代码规范要求
 ### 3.1 开发规范
 - **目录适配**：严格遵循此前定义的 structure.md，新增文件均放在对应模块目录下；

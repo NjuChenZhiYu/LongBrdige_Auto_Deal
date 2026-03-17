@@ -22,10 +22,6 @@
             <p>立即检查并推送预警。</p>
             <button type="submit" class="warning-btn">立即检查 (飞书推送)</button>
         </form>
-        <form action="/test_alert" method="POST" style="margin-top: 15px;">
-            <p>强制发送测试消息 (验证 Webhook 和关键词)。</p>
-            <button type="submit" style="background-color: #9C27B0;">发送测试告警</button>
-        </form>
         <hr>
         <h2>🤖 AI 智能分析</h2>
         <form action="/api/reports/trigger/hk" method="POST" onsubmit="return triggerReport(this, 'HK')">
@@ -85,7 +81,7 @@
 
     async function refreshFutuQuotes() {
         try {
-            const response = await fetch('/api/futu/quotes');
+            const response = await fetch('/api/futu/quotes?t=' + new Date().getTime());
             let quotes = await response.json();
             
             // Apply sorting if active
@@ -114,7 +110,8 @@
             tbody.innerHTML = '';
             
             if (quotes.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">暂无行情数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">暂无行情数据 (请确保Futu Monitor正在运行)</td></tr>';
+                document.getElementById('last-updated').textContent = '最后更新: ' + new Date().toLocaleTimeString() + ' (无数据)';
                 return;
             }
 
@@ -134,8 +131,11 @@
             });
             
             document.getElementById('last-updated').textContent = '最后更新: ' + new Date().toLocaleTimeString();
+            document.getElementById('last-updated').style.color = '#666';
         } catch (error) {
             console.error('Error fetching quotes:', error);
+            document.getElementById('last-updated').textContent = '更新失败: ' + new Date().toLocaleTimeString();
+            document.getElementById('last-updated').style.color = 'red';
         }
     }
 

@@ -24,8 +24,11 @@ Global_Quant_System/          # (建议改个更宏大的名字，比如这个)
 │   │   ├── llm_engine.py     # 【建议新增】专门负责调用大模型生成研报
 │   │   └── strategy.py       # 共享的异动计算公式 (如 IV 计算、均量对比)
 │   ├── monitor/ 
-│   │   ├── longport_task.py  # 【重构】原有的长桥监控主控
-│   │   └── futu_task.py      # 【新增】富途的监控主控
+│   │   ├── base_monitor.py         # 【新增】监控器抽象基类
+│   │   ├── us_watchlist_monitor.py # 【重命名】美股行情监控器 (原 watchlist_monitor.py)
+│   │   ├── hk_watchlist_monitor.py # 【新增】港股行情监控器 (原 utils.py)
+│   │   ├── longport_task.py        # 【重构】原有的长桥监控主控
+│   │   └── futu_task.py            # 【新增】富途的监控主控
 │   └── utils/ 
 ├── tests/            # 核心测试目录，所有测试/验证/调试脚本均应放置于此
 │   ├── check_*.py    # 环境/端口/配置检查脚本

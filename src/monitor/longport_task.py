@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from src.api.longport.client import longport_client
-from src.monitor.watchlist_monitor import WatchlistMonitor
+from src.monitor.us_watchlist_monitor import USWatchlistMonitor
 from src.monitor.option_monitor import OptionMonitor
 from src.monitor.quote_monitor import subscribe_watchlist_quote
 from longport.openapi import SubType
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class LongPortMonitorTask:
     def __init__(self):
-        self.watchlist_monitor = WatchlistMonitor()
+        self.watchlist_monitor = USWatchlistMonitor()
         self.option_monitor = OptionMonitor()
         self.ctx = None
 
