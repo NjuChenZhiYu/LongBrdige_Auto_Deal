@@ -15,6 +15,17 @@ if not os.path.exists(futu_log_dir):
         pass
 os.environ["appdata"] = futu_log_dir
 
+
+# Redirect Futu logs to local logs directory (must be before importing futu)
+# This fixes PermissionError on Windows AppData
+futu_log_dir = os.path.join(os.getcwd(), "logs", "futu_appdata")
+if not os.path.exists(futu_log_dir):
+    try:
+        os.makedirs(futu_log_dir)
+    except:
+        pass
+os.environ["appdata"] = futu_log_dir
+
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 from config.settings import Settings
@@ -251,7 +262,12 @@ def hk_market():
                                futu_quotes=futu_quotes)
     except Exception as e:
         logger.error(f"Error in hk_market route: {e}", exc_info=True)
+        logger.error(f"Error in hk_market route: {e}", exc_info=True)
         return f"Internal Server Error: {e}", 500
+
+@app.route('/reports')
+def reports_page():
+    return render_template('reports.html')
 
 @app.route('/reports')
 def reports_page():
@@ -267,6 +283,9 @@ def get_reports():
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
+        market = request.args.get('market')
+        date = request.args.get('date')
+        reports = db_manager.get_reports(page=page, per_page=per_page, market=market, date=date)
         market = request.args.get('market')
         date = request.args.get('date')
         reports = db_manager.get_reports(page=page, per_page=per_page, market=market, date=date)
@@ -333,6 +352,7 @@ def update_futu_thresholds():
     except ValueError:
         pass # Handle invalid input
         
+    return redirect(url_for('hk_market'))
     return redirect(url_for('hk_market'))
 
 @app.route('/sync_futu_watchlist', methods=['POST'])
