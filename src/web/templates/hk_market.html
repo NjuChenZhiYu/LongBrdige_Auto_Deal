@@ -1,0 +1,186 @@
+{% extends "layout.html" %}
+
+{% block title %}港股市场 - 量化交易监控中心{% endblock %}
+
+{% block content %}
+<div class="grid-container">
+    <div class="card">
+        <h2>港股监控阈值 (Futu)</h2>
+        <form action="/update_futu_thresholds" method="POST">
+            <div class="form-group">
+                <label for="futu_price_change">全局价格波动阈值 (%)</label>
+                <input type="number" step="0.1" id="futu_price_change" name="price_change" value="{{ futu_thresholds.get('price_change', 2.0) }}" required>
+                <div class="hint">当股价涨跌幅超过此值时触发告警。</div>
+            </div>
+            <button type="submit">保存港股阈值</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>手动触发检查</h2>
+        <form action="/trigger_futu_check" method="POST">
+            <p>立即检查并推送预警。</p>
+            <button type="submit" class="warning-btn">立即检查 (飞书推送)</button>
+        </form>
+        <form action="/test_alert" method="POST" style="margin-top: 15px;">
+            <p>强制发送测试消息 (验证 Webhook 和关键词)。</p>
+            <button type="submit" style="background-color: #9C27B0;">发送测试告警</button>
+        </form>
+        <hr>
+        <h2>🤖 AI 智能分析</h2>
+        <form action="/api/reports/trigger/hk" method="POST" onsubmit="return triggerReport(this, 'HK')">
+            <p>基于当前港股行情，生成 AI 分析报告。</p>
+            <button type="submit" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">生成港股研报</button>
+        </form>
+        <hr>
+        <h2>同步自选股</h2>
+        <form action="/sync_futu_watchlist" method="POST">
+            <button type="submit" style="background-color: #2196F3;">从 Futu 同步</button>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <h2>港股实时行情</h2>
+    <div style="margin-bottom: 10px;">
+        <button onclick="refreshFutuQuotes()">刷新行情</button>
+        <span id="last-updated" style="margin-left: 10px; color: #666;"></span>
+    </div>
+    
+    <table id="futu-table">
+        <thead>
+            <tr>
+                <th onclick="sortTable(0)">代码 ⬍</th>
+                <th onclick="sortTable(1)">名称 ⬍</th>
+                <th onclick="sortTable(2)">最新价 ⬍</th>
+                <th onclick="sortTable(3)">涨跌额 ⬍</th>
+                <th onclick="sortTable(4)">涨跌幅 (%) ⬍</th>
+                <th onclick="sortTable(5)">成交量 ⬍</th>
+                <th onclick="sortTable(6)">更新时间 ⬍</th>
+            </tr>
+        </thead>
+        <tbody id="futu-tbody">
+            {% for quote in futu_quotes %}
+            <tr>
+                <td>{{ quote.code }}</td>
+                <td>{{ quote.name }}</td>
+                <td>{{ quote.last_price }}</td>
+                <td class="{{ 'up' if quote.change_amount > 0 else 'down' }}">{{ "%.3f"|format(quote.change_amount) }}</td>
+                <td class="{{ 'up' if quote.change_rate > 0 else 'down' }}">{{ "%.2f"|format(quote.change_rate) }}%</td>
+                <td>{{ quote.volume }}</td>
+                <td>{{ quote.update_time }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" style="text-align: center;">暂无行情数据 (请确保Futu Monitor正在运行)</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentSortColumn = -1;
+    let currentSortDirection = 'asc';
+
+    async function refreshFutuQuotes() {
+        try {
+            const response = await fetch('/api/futu/quotes');
+            let quotes = await response.json();
+            
+            // Apply sorting if active
+            if (currentSortColumn !== -1) {
+                quotes.sort((a, b) => {
+                    let valA, valB;
+                    // Map column index to property
+                    switch(currentSortColumn) {
+                        case 0: valA = a.code; valB = b.code; break;
+                        case 1: valA = a.name; valB = b.name; break;
+                        case 2: valA = a.last_price; valB = b.last_price; break;
+                        case 3: valA = a.change_amount; valB = b.change_amount; break;
+                        case 4: valA = a.change_rate; valB = b.change_rate; break;
+                        case 5: valA = a.volume; valB = b.volume; break;
+                        case 6: valA = a.update_time; valB = b.update_time; break;
+                        default: return 0;
+                    }
+                    
+                    if (valA < valB) return currentSortDirection === 'asc' ? -1 : 1;
+                    if (valA > valB) return currentSortDirection === 'asc' ? 1 : -1;
+                    return 0;
+                });
+            }
+
+            const tbody = document.getElementById('futu-tbody');
+            tbody.innerHTML = '';
+            
+            if (quotes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">暂无行情数据</td></tr>';
+                return;
+            }
+
+            quotes.forEach(quote => {
+                const tr = document.createElement('tr');
+                const upDownClass = quote.change_rate > 0 ? 'up' : 'down';
+                tr.innerHTML = `
+                    <td>${quote.code}</td>
+                    <td>${quote.name}</td>
+                    <td>${quote.last_price}</td>
+                    <td class="${upDownClass}">${quote.change_amount.toFixed(3)}</td>
+                    <td class="${upDownClass}">${quote.change_rate.toFixed(2)}%</td>
+                    <td>${quote.volume}</td>
+                    <td>${quote.update_time}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            document.getElementById('last-updated').textContent = '最后更新: ' + new Date().toLocaleTimeString();
+        } catch (error) {
+            console.error('Error fetching quotes:', error);
+        }
+    }
+
+    // Auto refresh every 5 seconds
+    setInterval(refreshFutuQuotes, 5000);
+
+    function sortTable(n) {
+        if (currentSortColumn === n) {
+            currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSortColumn = n;
+            currentSortDirection = 'asc';
+        }
+        
+        refreshFutuQuotes();
+        
+        const headers = document.querySelectorAll('#futu-table th');
+        headers.forEach((th, index) => {
+            let text = th.innerText.replace(' ▲', '').replace(' ▼', '').replace(' ⬍', '');
+            if (index === n) {
+                th.innerText = text + (currentSortDirection === 'asc' ? ' ▲' : ' ▼');
+            } else {
+                th.innerText = text + ' ⬍';
+            }
+        });
+    }
+
+    async function triggerReport(form, market) {
+        event.preventDefault();
+        const btn = form.querySelector('button');
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = '生成中...';
+        
+        try {
+            const response = await fetch(form.action, { method: 'POST' });
+            const result = await response.json();
+            alert(result.message || '操作完成');
+        } catch (e) {
+            alert('请求失败');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = originalText;
+        }
+        return false;
+    }
+</script>
+{% endblock %}

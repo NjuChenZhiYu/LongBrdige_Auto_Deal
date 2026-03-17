@@ -93,19 +93,33 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def get_reports(self, page=1, per_page=20):
-        """Get reports with pagination."""
+    def get_reports(self, page=1, per_page=20, market=None, date=None):
+        """Get reports with pagination and optional market/date filter."""
         conn = self.get_connection()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         offset = (page - 1) * per_page
 
         try:
-            cursor.execute('''
-                SELECT * FROM daily_reports 
-                ORDER BY created_at DESC 
-                LIMIT ? OFFSET ?
-            ''', (per_page, offset))
+            query = 'SELECT * FROM daily_reports'
+            params = []
+            conditions = []
+            
+            if market and market != 'All':
+                conditions.append('market = ?')
+                params.append(market)
+            
+            if date:
+                conditions.append('report_date = ?')
+                params.append(date)
+                
+            if conditions:
+                query += ' WHERE ' + ' AND '.join(conditions)
+                
+            query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+            params.extend([per_page, offset])
+            
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
         except Exception as e:
