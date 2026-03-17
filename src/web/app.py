@@ -69,12 +69,12 @@ def save_futu_config(config):
     with open(FUTU_CONFIG_PATH, 'w', encoding='utf-8') as f:
         yaml.dump(config, f, allow_unicode=True)
 
-async def check_and_alert(send_alert: bool = False):
+async def check_us_alert(send_alert: bool = False):
     """
     Check all monitored stocks and send alerts if thresholds are met.
     This function is used by both manual trigger and scheduled tasks.
     """
-    logger.info(f"Starting check_and_alert (send_alert={send_alert})...")
+    logger.info(f"Starting check_us_alert (send_alert={send_alert})...")
     try:
         config = load_config()
         symbols = config.get('symbols', [])
@@ -111,7 +111,7 @@ async def check_and_alert(send_alert: bool = False):
 def scheduled_job():
     """Wrapper for scheduled task to run async code"""
     logger.info("Running scheduled alert check...")
-    asyncio.run(check_and_alert(send_alert=True))
+    asyncio.run(check_us_alert(send_alert=True))
 
 import threading
 from src.monitor.option_monitor import option_monitor
@@ -331,7 +331,7 @@ async def trigger_hk_report():
         return jsonify({'error': str(e)}), 500
 
 from src.api.futu.client import futu_client
-from src.monitor.utils import handle_quote_alert
+from src.monitor.hk_watchlist_monitor import HKWatchlistMonitor
 
 @app.route('/update_futu_thresholds', methods=['POST'])
 def update_futu_thresholds():
@@ -391,7 +391,7 @@ async def check_futu_alerts(send_alert=False):
         # Calculate approximate turnover (volume * price)
         turnover = volume * last_price if volume and last_price else 0
         
-        triggered, _ = await handle_quote_alert(
+        triggered, _ = await HKWatchlistMonitor.handle_quote_alert(
             symbol=symbol, 
             last_price=last_price, 
             prev_close=prev_close, 
@@ -435,7 +435,7 @@ def update_thresholds():
 def trigger_check():
     """Manual trigger to check current prices against thresholds and send alerts if matched"""
     try:
-        asyncio.run(check_and_alert(send_alert=True))
+        asyncio.run(check_us_alert(send_alert=True))
     except Exception as e:
         print(f"Trigger check failed: {e}")
 

@@ -17,10 +17,10 @@ from src.api.dingtalk import DingTalkAlert
 logger = logging.getLogger(__name__)
 
 # Singleton lock to prevent duplicate processes
-LOCK_FILE = "/tmp/watchlist_monitor.lock"
+LOCK_FILE = "/tmp/us_watchlist_monitor.lock"
 
 def ensure_single_instance():
-    """Ensure only one instance of watchlist_monitor is running"""
+    """Ensure only one instance of us_watchlist_monitor is running"""
     global _lock_fd
     _lock_fd = open(LOCK_FILE, 'w')
     try:
@@ -30,11 +30,14 @@ def ensure_single_instance():
         logger.info(f"Singleton lock acquired (PID: {os.getpid()})")
         return True
     except IOError:
-        logger.error("Another instance of watchlist_monitor is already running. Exiting.")
+        logger.error("Another instance of us_watchlist_monitor is already running. Exiting.")
         return False
 
-class WatchlistMonitor:
+from src.monitor.base_monitor import BaseMonitor
+
+class USWatchlistMonitor(BaseMonitor):
     def __init__(self):
+        super().__init__()
         self.running = False
         self.ctx: Optional[QuoteContext] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -286,7 +289,7 @@ if __name__ == "__main__":
     if not ensure_single_instance():
         sys.exit(1)
 
-    monitor = WatchlistMonitor()
+    monitor = USWatchlistMonitor()
     try:
         asyncio.run(monitor.start())
     except KeyboardInterrupt:

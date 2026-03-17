@@ -1,7 +1,6 @@
 import logging
 import asyncio
 from futu import StockQuoteHandlerBase, RET_OK
-from src.monitor.utils import handle_quote_alert
 from tinydb import TinyDB, Query
 
 logger = logging.getLogger(__name__)
@@ -10,17 +9,19 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
     """
     Callback handler for Futu quote updates.
     """
-    def __init__(self, loop, thresholds, db=None):
+    def __init__(self, loop, thresholds, db=None, alert_handler=None):
         """
         Initialize the callback handler.
         
         :param loop: The asyncio event loop to run async tasks in.
         :param thresholds: The threshold configuration dictionary.
         :param db: The TinyDB instance for storing quotes.
+        :param alert_handler: Async function to handle alerts (handle_quote_alert).
         """
         self.loop = loop
         self.thresholds = thresholds
         self.db = db
+        self.alert_handler = alert_handler
         self.Quote = Query()
         super().__init__()
 
@@ -108,9 +109,9 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
                 display_symbol = f"{code} {name}" if name and name != code else code
 
                 # Dispatch the alert check to the asyncio loop
-                if self.loop and self.loop.is_running():
+                if self.loop and self.loop.is_running() and self.alert_handler:
                     asyncio.run_coroutine_threadsafe(
-                        handle_quote_alert(
+                        self.alert_handler(
                             symbol=display_symbol,
                             last_price=last_price,
                             prev_close=prev_close,
@@ -121,7 +122,11 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
                         self.loop
                     )
                 else:
-                    logger.warning("Event loop is not running, skipping alert check")
+                    if not self.alert_handler:
+                        # logger.warning("Alert handler not provided, skipping alert check")
+                        pass
+                    elif not (self.loop and self.loop.is_running()):
+                        logger.warning("Event loop is not running, skipping alert check")
                     
         except Exception as e:
             logger.error(f"Error processing Futu quote data: {e}")

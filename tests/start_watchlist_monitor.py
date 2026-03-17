@@ -6,7 +6,7 @@ import logging
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.monitor.watchlist_monitor import WatchlistMonitor
+from src.monitor.us_watchlist_monitor import USWatchlistMonitor
 
 if __name__ == "__main__":
     # Configure logging
@@ -16,7 +16,7 @@ if __name__ == "__main__":
     )
     
     print("Starting Watchlist Monitor Example...")
-    monitor = WatchlistMonitor()
+    monitor = USWatchlistMonitor()
     try:
         asyncio.run(monitor.start())
     except KeyboardInterrupt:

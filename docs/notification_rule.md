@@ -20,8 +20,8 @@ This document outlines the notification rules for DingTalk (US Market) and Feish
 ### 3.1. Real-time Price Monitoring (Watchlist Monitor)
 
 - **Source**: 
-  - US Market: `src/monitor/watchlist_monitor.py`
-  - HK Market: `src/monitor/futu_task.py` (via `callback.py`)
+  - US Market: `src/monitor/us_watchlist_monitor.py`
+  - HK Market: `src/monitor/hk_watchlist_monitor.py` (via `futu_task.py`)
 - **Behavior**:
   - **Monitoring**: Continuously checks price changes and spreads against thresholds.
   - **Action**: 
