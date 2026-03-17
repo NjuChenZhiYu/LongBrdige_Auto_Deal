@@ -14,53 +14,53 @@ This document outlines the notification rules for DingTalk (US Market) and Feish
   - **Format**: Uses Feishu's interactive card/post format.
   - **Keyword**: Alerts usually contain "告警" or specific report titles.
 
-## 2. Deduplication Logic (Updated)
-
-As of the latest update, the **1-hour deduplication cache has been disabled** to ensure real-time alerting.
-
-- **Previous Logic**: Same symbol + same reason within 1 hour (3600s) would be deduplicated (suppressed).
-- **Current Logic**: 
-  - `DEDUP_WINDOW_SECONDS` is set to `0`.
-  - **All alerts are sent immediately** regardless of frequency, provided they meet the threshold conditions.
-  - This applies to both DingTalk and Feishu.
 
 ## 3. Alert Triggering Conditions
 
 ### 3.1. Real-time Price Monitoring (Watchlist Monitor)
 
-- **Source**: `src/monitor/watchlist_monitor.py` (US/LongPort) & `src/monitor/futu_monitor.py` (HK/Futu).
-- **Triggers**:
-  - **Price Change**: Triggers when price change percentage absolute value `>= PRICE_CHANGE_THRESHOLD` (default 5.0%).
-  - **Spread**: Triggers when bid/ask spread exceeds `SPREAD_THRESHOLD` (if configured).
-- **Process**:
-  1. Market data push received.
-  2. Check against thresholds.
-  3. If threshold exceeded -> Send Alert (DingTalk for US, Feishu for HK).
+- **Source**: 
+  - US Market: `src/monitor/watchlist_monitor.py`
+  - HK Market: `src/monitor/futu_task.py` (via `callback.py`)
+- **Behavior**:
+  - **Monitoring**: Continuously checks price changes and spreads against thresholds.
+  - **Action**: 
+    - **HK Market**: Updates TinyDB cache (`data/futu_quotes.json`) for frontend display. Real-time data is **NOT** stored in the persistent database (queried from Futu API). Only daily anomalies from the scheduled report are saved to the persistent database. **Alert sending is DISABLED** (`send_alert=False` in `callback.py`).
+    - **US Market**: Logs trigger conditions. **Alert sending is DISABLED** (default `send_alert=False` in `handle_watchlist_quote`).
+  - **Reason**: Real-time alerts are disabled by default to prevent excessive notification spam during volatile market conditions.
 
-### 3.2. Scheduled LLM Reports
+### 3.2. Scheduled LLM Reports (Auto-Triggered)
 
-- **Source**: `src/services/llm_analyst.py`.
+- **Source**: `src/services/llm_analyst.py` (triggered by `src/web/app.py` scheduler).
 - **US Market Report (Gemini)**:
-  - **Schedule**: 22:50 CST (Pre-market), 07:50 CST (Post-market).
-  - **Channel**: DingTalk.
-  - **Content**: Analysis of watchlist stocks exceeding thresholds.
+  - **Schedule**: 
+    - **22:50 CST** (Pre-market analysis, no DB save)
+    - **07:50 CST** (Post-market analysis, saves to DB)
+  - **Channel**: DingTalk (钉钉).
+  - **Content**: AI analysis of US watchlist stocks exceeding thresholds.
 - **HK Market Report (Kimi)**:
-  - **Schedule**: 10:00 CST (Morning), 15:20 CST (Afternoon).
-  - **Channel**: Feishu.
-  - **Content**: Analysis of HK stocks exceeding thresholds using Kimi LLM.
+  - **Schedule**: 
+    - **10:00 CST** (Morning analysis, no DB save)
+    - **15:20 CST** (After-market analysis, saves to DB)
+  - **Channel**: Feishu (飞书).
+  - **Content**: AI analysis of HK stocks exceeding thresholds.
 
-### 3.3. Options Monitoring
+### 3.3. Manual Triggers (User Action)
+
+Alerts can be manually triggered via the Web Dashboard buttons:
+
+- **HK Market Page (`/hk_market`)**:
+  - **"立即检查 (飞书推送)"**: Calls `/trigger_futu_check`. Checks current prices against thresholds and **SENDS** Feishu alerts for all matches.
+  - **"生成港股研报"**: Calls `/api/reports/trigger/hk`. Generates and **SENDS** a full AI report to Feishu.
+
+- **US Market Page (`/`)**:
+  - **"立即检查"**: Calls `/trigger_check`. Checks current prices against thresholds and **SENDS** DingTalk alerts for all matches.
+  - **"生成美股研报"**: Calls `/api/reports/trigger/us`. Generates and **SENDS** a full AI report to DingTalk.
+
+### 3.4. Options Monitoring
 
 - **Source**: `src/monitor/option_monitor.py`.
 - **Triggers**: Large option trades, unusual IV, volume spikes.
 - **Channel**: DingTalk.
 
-## 4. Troubleshooting
 
-- **No Alerts?**
-  - Check `.env` for valid Webhook URLs.
-  - Verify `PRICE_CHANGE_THRESHOLD` is not too high.
-  - Check logs (`logs/web.log`, `logs/monitor.log`) for API errors.
-- **Too Many Alerts?**
-  - Increase `PRICE_CHANGE_THRESHOLD`.
-  - Re-enable deduplication by setting `DEDUP_WINDOW_SECONDS > 0` in `src/api/dingtalk.py` and `src/api/feishu.py`.

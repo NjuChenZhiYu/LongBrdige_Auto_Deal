@@ -88,7 +88,13 @@ class WatchlistMonitor:
                 logger.warning(f"No cached prev_close for {symbol}, using event data")
             
             # Check if event is valid PushQuote
-            triggered, alert_data = await handle_watchlist_quote(symbol, wrapped_event, self.threshold_config)
+            # Real-time alerts disabled per docs/notification_rule.md to prevent spam
+            triggered, alert_data = await handle_watchlist_quote(
+                symbol, 
+                wrapped_event, 
+                self.threshold_config,
+                send_alert=False
+            )
             if triggered:
                 logger.info(f"🚨 Alert triggered for {symbol}: {alert_data}")
                 # Note: DingTalk alert is already sent by handle_watchlist_quote, no need to send again here

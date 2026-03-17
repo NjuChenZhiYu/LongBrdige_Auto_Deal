@@ -28,10 +28,10 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
         """
         Callback method when quote data is received.
         """
-        ret_code, data, str_msg = super(FutuQuoteCallback, self).on_recv_rsp(rsp_pb)
+        ret_code, data = super(FutuQuoteCallback, self).on_recv_rsp(rsp_pb)
         
         if ret_code != RET_OK:
-            logger.error(f"Futu Quote Callback Error: {str_msg}")
+            logger.error(f"Futu Quote Callback Error: {data}")
             return
         
         try:
@@ -116,7 +116,7 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
                             prev_close=prev_close,
                             threshold_config=self.thresholds,
                             market_type=market_type,
-                            send_alert=True
+                            send_alert=False,  # Explicitly disabled per docs/notification_rule.md
                         ),
                         self.loop
                     )

@@ -1,4 +1,5 @@
 import os
+import time
 import yaml
 import asyncio
 import logging
@@ -195,15 +196,26 @@ async def get_longport_data(configured_symbols):
         return [{'symbol': s, 'name': s, 'price': 0, 'change_rate': 0} for s in configured_symbols]
 
 def get_futu_quotes():
-    """Fetch Futu quotes from TinyDB"""
-    try:
-        db = TinyDB(FUTU_DB_PATH)
-        quotes = db.all()
-        db.close()
-        return quotes
-    except Exception as e:
-        logger.error(f"Error reading Futu DB: {e}")
-        return []
+    """Fetch Futu quotes from TinyDB with retries for Windows file locking"""
+    retries = 3
+    last_error = None
+    
+    for i in range(retries):
+        try:
+            if os.path.exists(FUTU_DB_PATH):
+                mtime = os.path.getmtime(FUTU_DB_PATH)
+                # logger.debug(f"Reading Futu DB. Last modified: {datetime.fromtimestamp(mtime)}")
+            
+            db = TinyDB(FUTU_DB_PATH)
+            quotes = db.all()
+            db.close()
+            return quotes
+        except Exception as e:
+            last_error = e
+            time.sleep(0.1) # Wait 100ms and retry
+            
+    logger.error(f"Error reading Futu DB after {retries} attempts: {last_error}")
+    return []
 
 @app.route('/')
 async def index():
@@ -407,46 +419,6 @@ def trigger_check():
     except Exception as e:
         print(f"Trigger check failed: {e}")
 
-    return redirect(url_for('index'))
-
-@app.route('/test_alert', methods=['POST'])
-def test_alert():
-    """Send test alerts to verify configuration"""
-    try:
-        # Test DingTalk (US Market default)
-        AlertManager.send_dingtalk("Test Alert (DingTalk): This is a test message to verify DingTalk configuration.")
-        
-        # Test Feishu (HK Market default)
-        AlertManager.send_feishu("This is a test message to verify Feishu configuration.", title="Test Alert (Feishu)")
-        
-        logger.info("Test alerts sent.")
-    except Exception as e:
-        logger.error(f"Test alert failed: {e}")
-    return redirect(url_for('index'))
-
-@app.route('/generate_ai_report', methods=['POST'])
-def generate_ai_report():
-    """Generate AI analysis report for current watchlist stocks"""
-    try:
-        market_type = request.form.get('market_type', 'US')
-        logger.info(f"Manual AI report generation triggered for {market_type} market")
-        
-        # Run the report generation with live data
-        if market_type == 'US':
-            asyncio.run(llm_analyst.generate_longport_us_report())
-            return redirect(url_for('index'))
-        elif market_type == 'HK':
-            asyncio.run(llm_analyst.generate_futu_hk_report())
-            return redirect(url_for('hk_market'))
-        else:
-            logger.warning(f"Unknown market type: {market_type}")
-            return redirect(url_for('index'))
-        
-        logger.info(f"AI report for {market_type} generated and sent successfully")
-    except Exception as e:
-        logger.error(f"AI report generation failed: {e}")
-        # Default redirect if error or unknown path, though we return early above
-        return redirect(url_for('index'))
     return redirect(url_for('index'))
 
 @app.route('/generate_futu_kimi_report', methods=['POST'])

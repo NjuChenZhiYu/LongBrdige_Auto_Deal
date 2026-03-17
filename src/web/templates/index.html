@@ -22,10 +22,6 @@
             <p>立即检查并推送预警 (仅当满足阈值时)。</p>
             <button type="submit" class="warning-btn">立即检查</button>
         </form>
-        <form action="/test_alert" method="POST" style="margin-top: 15px;">
-            <p>强制发送测试消息 (验证 Webhook 和关键词)。</p>
-            <button type="submit" style="background-color: #9C27B0;">发送测试告警</button>
-        </form>
         <hr>
         <h2>🤖 AI 智能分析</h2>
         <form action="/api/reports/trigger/us" method="POST" onsubmit="return triggerReport(this, 'US')">

@@ -3,7 +3,6 @@ import datetime
 from typing import Dict, Tuple, Optional
 from src.api.dingtalk import DingTalkAlert
 from src.api.feishu import FeishuAlert
-from src.api.llm import llm_analyzer
 from src.services.signal_recorder import signal_recorder
 
 logger = logging.getLogger(__name__)
@@ -58,18 +57,8 @@ async def handle_quote_alert(
                     "timestamp": current_time_str
                 })
                 
-                # Get LLM analysis
-                llm_analysis = None
-                if send_alert:
-                    llm_analysis = await llm_analyzer.analyze_stock_alert(
-                        symbol=symbol,
-                        last_price=last_price,
-                        change_rate=change_rate,
-                        prev_close=prev_close,
-                        volume=volume,
-                        turnover=turnover,
-                        market_type=market_type
-                    )
+                # LLM analysis for individual stocks is DEPRECATED/REMOVED to prevent token burnout.
+                # Only basic alerts are sent if send_alert is True.
                 
                 title = f"[{market_type} Alert] {symbol} {direction}幅≥{price_change_threshold}%"
                 content = f"""### {market_name}价格异动告警
@@ -81,14 +70,6 @@ async def handle_quote_alert(
 * **Keywords**: {market_type}, Alert, {market_name}, 监控, 告警
 """
                 
-                # Add LLM analysis if available
-                if llm_analysis:
-                    content += f"""\n### 🤖 AI 智能分析
-{llm_analysis}
-"""
-                else:
-                    content += "\n*（AI 分析未启用或生成失败）*"
-                
                 # Asynchronous alert sending
                 reason_suffix = "rise" if change_rate > 0 else "fall"
                 
@@ -97,17 +78,17 @@ async def handle_quote_alert(
                         # Use Feishu for HK market
                         feishu_content = f"{content}\n\n[Feishu Alert Channel]"
                         await FeishuAlert.send_alert(title, feishu_content)
-                        logger.info(f"Feishu alert with LLM analysis sent for {symbol}: {change_rate:.2f}%")
+                        logger.info(f"Feishu alert sent for {symbol}: {change_rate:.2f}%")
                     else:
                         # Use DingTalk for other markets (US)
                         await DingTalkAlert.send_alert(title, content, symbol, f"price_change_{reason_suffix}")
-                        logger.info(f"DingTalk alert with LLM analysis sent for {symbol}: {change_rate:.2f}%")
+                        logger.info(f"DingTalk alert sent for {symbol}: {change_rate:.2f}%")
                 else:
                     logger.info(f"Alert condition met for {symbol} ({change_rate:.2f}%), but sending skipped (send_alert=False)")
                     
                 triggered = True
                 alert_data['price_change'] = change_rate
-                alert_data['llm_analysis'] = llm_analysis
+                # alert_data['llm_analysis'] = llm_analysis # Removed
                 
     except Exception as e:
         logger.error(f"Error in handle_quote_alert for {symbol}: {e}")
