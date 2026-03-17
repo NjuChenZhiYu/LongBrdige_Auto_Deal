@@ -1,0 +1,194 @@
+{% extends "layout.html" %}
+
+{% block title %}每日研报中心 - 量化交易监控中心{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+    .filters { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; }
+    .report-meta { color: #666; font-size: 0.9em; margin-bottom: 10px; }
+    .report-summary { color: #333; }
+    .action-btn { cursor: pointer; color: #007bff; text-decoration: underline; margin-right: 10px; }
+    .delete-btn { color: #dc3545; }
+    
+    /* Pagination */
+    .pagination { display: flex; justify-content: center; margin-top: 20px; gap: 10px; }
+    .page-btn { padding: 5px 10px; border: 1px solid #ddd; cursor: pointer; background: #fff; }
+    .page-btn.active { background-color: #007bff; color: white; border-color: #007bff; }
+    .page-btn:disabled { color: #ccc; cursor: not-allowed; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>每日研报中心</h2>
+    
+    <div class="filters">
+        <label for="marketFilter">市场筛选:</label>
+        <select id="marketFilter" onchange="loadReports(1)" style="width: auto; margin-right: 15px;">
+            <option value="All">全部市场</option>
+            <option value="US">美股 (US)</option>
+            <option value="HK">港股 (HK)</option>
+        </select>
+        
+        <label for="dateFilter">日期筛选:</label>
+        <input type="date" id="dateFilter" onchange="loadReports(1)" style="width: auto; margin-right: 15px;">
+
+        <button onclick="loadReports(1)" class="success" style="padding: 8px 15px;">刷新列表</button>
+    </div>
+
+    <table id="reports-table">
+        <thead>
+            <tr>
+                <th>日期</th>
+                <th>时间</th>
+                <th>市场</th>
+                <th>触发类型</th>
+                <th>摘要</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="reports-tbody">
+            <!-- Reports will be loaded here -->
+        </tbody>
+    </table>
+
+    <div class="pagination" id="pagination">
+        <!-- Pagination controls -->
+    </div>
+</div>
+
+<!-- Modal for report details -->
+<div class="modal" id="reportModal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <div id="modalReportHeader" style="border-bottom: 1px solid #eee; margin-bottom: 15px; padding-bottom: 10px;"></div>
+        <div class="markdown-body" id="modalReportContent"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentPage = 1;
+    const perPage = 20;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadReports(1);
+    });
+
+    async function loadReports(page) {
+        currentPage = page;
+        const market = document.getElementById('marketFilter').value;
+        const date = document.getElementById('dateFilter').value;
+        const tbody = document.getElementById('reports-tbody');
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">加载中...</td></tr>';
+
+        try {
+            let url = `/api/reports?page=${page}&per_page=${perPage}&market=${market}`;
+            if (date) {
+                url += `&date=${date}`;
+            }
+            const response = await fetch(url);
+            const reports = await response.json();
+            
+            tbody.innerHTML = '';
+            if (reports.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">暂无研报</td></tr>';
+                renderPagination(0);
+                return;
+            }
+
+            reports.forEach(report => {
+                const tr = document.createElement('tr');
+                const date = new Date(report.created_at);
+                const dateStr = date.toLocaleDateString();
+                const timeStr = date.toLocaleTimeString();
+                
+                // Extract a brief summary (first 50 chars of content if summary missing)
+                const summary = report.content.substring(0, 50) + '...';
+
+                tr.innerHTML = `
+                    <td>${dateStr}</td>
+                    <td>${timeStr}</td>
+                    <td><span class="badge ${report.market === 'US' ? 'badge-watchlist' : 'badge-config'}">${report.market}</span></td>
+                    <td>${report.trigger_type || 'UNKNOWN'}</td>
+                    <td class="report-summary">${summary}</td>
+                    <td>
+                        <span class="action-btn" onclick='viewReport(${JSON.stringify(report).replace(/'/g, "&#39;")})'>查看</span>
+                        <span class="action-btn delete-btn" onclick="deleteReport(${report.id})">删除</span>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // Simplified pagination (assuming if we got full page, there might be more)
+            renderPagination(reports.length);
+
+        } catch (error) {
+            console.error('Error loading reports:', error);
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: red;">加载失败</td></tr>';
+        }
+    }
+
+    function renderPagination(count) {
+        const div = document.getElementById('pagination');
+        div.innerHTML = '';
+        
+        const prevBtn = document.createElement('button');
+        prevBtn.innerText = '上一页';
+        prevBtn.className = 'page-btn';
+        prevBtn.disabled = currentPage === 1;
+        prevBtn.onclick = () => loadReports(currentPage - 1);
+        div.appendChild(prevBtn);
+
+        const nextBtn = document.createElement('button');
+        nextBtn.innerText = '下一页';
+        nextBtn.className = 'page-btn';
+        // If we got less than perPage, we are likely at the end
+        nextBtn.disabled = count < perPage; 
+        nextBtn.onclick = () => loadReports(currentPage + 1);
+        div.appendChild(nextBtn);
+    }
+
+    function viewReport(report) {
+        const modal = document.getElementById('reportModal');
+        const header = document.getElementById('modalReportHeader');
+        const content = document.getElementById('modalReportContent');
+        
+        header.innerHTML = `<h3>${report.market} 市场研报 - ${new Date(report.created_at).toLocaleString()}</h3>`;
+        content.innerHTML = marked.parse(report.content);
+        
+        modal.style.display = "block";
+    }
+
+    function closeModal() {
+        document.getElementById('reportModal').style.display = "none";
+    }
+
+    async function deleteReport(id) {
+        if (!confirm('确定要删除这条研报吗？')) return;
+        
+        try {
+            const response = await fetch(`/api/reports/${id}`, { method: 'DELETE' });
+            const result = await response.json();
+            if (result.status === 'success') {
+                loadReports(currentPage);
+            } else {
+                alert('删除失败: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Error deleting report:', error);
+            alert('删除出错');
+        }
+    }
+
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+        const modal = document.getElementById('reportModal');
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    }
+</script>
+{% endblock %}

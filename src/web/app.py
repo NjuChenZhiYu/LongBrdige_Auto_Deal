@@ -3,6 +3,17 @@ import yaml
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
+
+# Redirect Futu logs to local logs directory (must be before importing futu)
+# This fixes PermissionError on Windows AppData
+futu_log_dir = os.path.join(os.getcwd(), "logs", "futu_appdata")
+if not os.path.exists(futu_log_dir):
+    try:
+        os.makedirs(futu_log_dir)
+    except:
+        pass
+os.environ["appdata"] = futu_log_dir
+
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 from config.settings import Settings
@@ -197,7 +208,7 @@ def get_futu_quotes():
 @app.route('/')
 async def index():
     try:
-        # LongPort Data
+        # LongPort Data (US Market)
         config = load_config()
         symbols = config.get('symbols', [])
         thresholds = config.get('thresholds', {
@@ -205,22 +216,34 @@ async def index():
         })
         market_data = await get_longport_data(symbols)
         
-        # Futu Data
+        return render_template('index.html', 
+                               symbols=symbols, 
+                               thresholds=thresholds, 
+                               market_data=market_data)
+    except Exception as e:
+        logger.error(f"Error in index route: {e}", exc_info=True)
+        return f"Internal Server Error: {e}", 500
+
+@app.route('/hk_market')
+def hk_market():
+    try:
+        # Futu Data (HK Market)
         futu_config = load_futu_config()
         futu_symbols = futu_config.get('symbols', [])
         futu_thresholds = futu_config.get('thresholds', {})
         futu_quotes = get_futu_quotes()
         
-        return render_template('index.html', 
-                               symbols=symbols, 
-                               thresholds=thresholds, 
-                               market_data=market_data,
+        return render_template('hk_market.html', 
                                futu_symbols=futu_symbols,
                                futu_thresholds=futu_thresholds,
                                futu_quotes=futu_quotes)
     except Exception as e:
-        logger.error(f"Error in index route: {e}", exc_info=True)
+        logger.error(f"Error in hk_market route: {e}", exc_info=True)
         return f"Internal Server Error: {e}", 500
+
+@app.route('/reports')
+def reports_page():
+    return render_template('reports.html')
 
 @app.route('/api/futu/quotes')
 def api_futu_quotes():
@@ -232,7 +255,9 @@ def get_reports():
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
-        reports = db_manager.get_reports(page=page, per_page=per_page)
+        market = request.args.get('market')
+        date = request.args.get('date')
+        reports = db_manager.get_reports(page=page, per_page=per_page, market=market, date=date)
         return jsonify(reports)
     except Exception as e:
         logger.error(f"Error fetching reports: {e}")
@@ -296,7 +321,7 @@ def update_futu_thresholds():
     except ValueError:
         pass # Handle invalid input
         
-    return redirect(url_for('index'))
+    return redirect(url_for('hk_market'))
 
 @app.route('/sync_futu_watchlist', methods=['POST'])
 def sync_futu_watchlist():
@@ -316,7 +341,7 @@ def sync_futu_watchlist():
     except Exception as e:
         logger.error(f"Sync Futu watchlist failed: {e}")
         
-    return redirect(url_for('index'))
+    return redirect(url_for('hk_market'))
 
 async def check_futu_alerts(send_alert=False):
     quotes = get_futu_quotes()
@@ -355,7 +380,7 @@ def trigger_futu_check():
         asyncio.run(check_futu_alerts(send_alert=True))
     except Exception as e:
         logger.error(f"Futu trigger check failed: {e}")
-    return redirect(url_for('index'))
+    return redirect(url_for('hk_market'))
 
 from src.api.longport.push.watchlist import handle_watchlist_quote
 
@@ -409,8 +434,10 @@ def generate_ai_report():
         # Run the report generation with live data
         if market_type == 'US':
             asyncio.run(llm_analyst.generate_longport_us_report())
+            return redirect(url_for('index'))
         elif market_type == 'HK':
             asyncio.run(llm_analyst.generate_futu_hk_report())
+            return redirect(url_for('hk_market'))
         else:
             logger.warning(f"Unknown market type: {market_type}")
             return redirect(url_for('index'))
@@ -418,6 +445,8 @@ def generate_ai_report():
         logger.info(f"AI report for {market_type} generated and sent successfully")
     except Exception as e:
         logger.error(f"AI report generation failed: {e}")
+        # Default redirect if error or unknown path, though we return early above
+        return redirect(url_for('index'))
     return redirect(url_for('index'))
 
 @app.route('/generate_futu_kimi_report', methods=['POST'])
@@ -432,7 +461,7 @@ def generate_futu_kimi_report():
         logger.info("Futu Kimi report generated and sent successfully")
     except Exception as e:
         logger.error(f"Futu Kimi report generation failed: {e}")
-    return redirect(url_for('index'))
+    return redirect(url_for('hk_market'))
 
 @app.route('/sync_watchlist', methods=['POST'])
 def sync_watchlist():

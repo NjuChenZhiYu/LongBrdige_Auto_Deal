@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}量化交易监控中心{% endblock %}</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f4f6f9; }
+        h1, h2, h3 { color: #333; }
+        .card { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input[type="number"], input[type="text"], select { padding: 10px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        button:hover { background-color: #0056b3; }
+        button.danger { background-color: #dc3545; }
+        button.danger:hover { background-color: #bd2130; }
+        button.warning-btn { background-color: #ff9800; }
+        button.warning-btn:hover { background-color: #e68a00; }
+        button.success { background-color: #28a745; }
+        button.success:hover { background-color: #218838; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; font-weight: 600; cursor: pointer; user-select: none; }
+        th:hover { background-color: #e9ecef; }
+        tr:hover { background-color: #f1f1f1; }
+        
+        .up { color: #dc3545; font-weight: bold; }
+        .down { color: #28a745; font-weight: bold; }
+        
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 0.8em; margin-right: 5px; }
+        .badge-config { background-color: #e2e3e5; color: #383d41; }
+        .badge-watchlist { background-color: #d1ecf1; color: #0c5460; }
+
+        /* Navigation */
+        .nav-tabs { display: flex; border-bottom: 1px solid #ddd; margin-bottom: 20px; list-style: none; padding: 0; }
+        .nav-item { margin-right: 5px; }
+        .nav-link { 
+            display: block; padding: 10px 20px; text-decoration: none; color: #555; 
+            border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; 
+        }
+        .nav-link:hover { background-color: #f8f9fa; }
+        .nav-link.active { 
+            background-color: #fff; border-color: #ddd; border-bottom-color: #fff; 
+            color: #007bff; font-weight: bold; margin-bottom: -1px; 
+        }
+        
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .grid-container { grid-template-columns: 1fr; } }
+
+        /* Modal */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 800px; border-radius: 8px; }
+        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close:hover { color: black; }
+        .markdown-body { line-height: 1.6; }
+        .markdown-body h1, .markdown-body h2 { border-bottom: 1px solid #eaecef; padding-bottom: .3em; }
+        .markdown-body blockquote { border-left: .25em solid #dfe2e5; color: #6a737d; padding: 0 1em; margin: 0; }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <h1>量化交易监控中心</h1>
+    
+    <ul class="nav-tabs">
+        <li class="nav-item">
+            <a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/">美股市场 (LongPort)</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if request.path == '/hk_market' %}active{% endif %}" href="/hk_market">港股市场 (Futu)</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if request.path == '/reports' %}active{% endif %}" href="/reports">每日研报中心</a>
+        </li>
+    </ul>
+
+    <div class="content">
+        {% block content %}{% endblock %}
+    </div>
+
+    <script>
+        // Common scripts if any
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
