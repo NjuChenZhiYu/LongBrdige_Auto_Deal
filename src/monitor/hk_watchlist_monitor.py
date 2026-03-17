@@ -4,6 +4,7 @@ import asyncio
 import time
 import os
 import yaml
+import threading
 from typing import Dict, Tuple, Optional, List
 from tinydb import TinyDB, Query
 
@@ -35,6 +36,7 @@ class HKWatchlistMonitor(BaseMonitor):
         self.ctx = None
         self.loop = None
         self.db = None
+        self.db_lock = threading.Lock()
         
     @staticmethod
     async def handle_quote_alert(
@@ -169,7 +171,11 @@ class HKWatchlistMonitor(BaseMonitor):
                         'update_time': row['update_time']
                     }
                     
-                    self.db.upsert(quote_data, Quote.code == code)
+                    try:
+                        with self.db_lock:
+                            self.db.upsert(quote_data, Quote.code == code)
+                    except Exception as e:
+                        logger.error(f"Error updating DB in fetch_initial_snapshot: {e}")
                     count += 1
                 
                 logger.info(f"Updated DB with {count} snapshot records")
@@ -221,26 +227,6 @@ class HKWatchlistMonitor(BaseMonitor):
         except Exception as e:
             logger.error(f"Failed to sync user securities: {e}")
 
-    async def poll_snapshot(self, ctx, symbols, interval=30):
-        """
-        Periodically poll market snapshot to ensure data freshness.
-        """
-        while self.running:
-            try:
-                # Sleep first to avoid immediate double fetch
-                await asyncio.sleep(interval)
-                
-                logger.info("Polling market snapshot...")
-                # Run sync function in thread pool
-                await asyncio.to_thread(self.fetch_initial_snapshot, ctx, symbols)
-                
-            except asyncio.CancelledError:
-                logger.info("Snapshot polling cancelled")
-                break
-            except Exception as e:
-                logger.error(f"Poll snapshot failed: {e}")
-                await asyncio.sleep(5) # Retry delay
-
     async def start(self):
         """
         Start the HK Watchlist Monitor service.
@@ -276,8 +262,14 @@ class HKWatchlistMonitor(BaseMonitor):
 
             # Set callback
             thresholds = Settings.FUTU_SYMBOLS_CONFIG.get('thresholds', {})
-            # Pass handle_quote_alert as the alert handler
-            handler = FutuQuoteCallback(self.loop, thresholds, db=self.db, alert_handler=self.handle_quote_alert)
+            # Pass handle_quote_alert as the alert handler and the db_lock
+            handler = FutuQuoteCallback(
+                self.loop, 
+                thresholds, 
+                db=self.db, 
+                alert_handler=self.handle_quote_alert,
+                db_lock=self.db_lock
+            )
             self.ctx.set_handler(handler)
             
             # Subscribe to symbols
@@ -295,10 +287,6 @@ class HKWatchlistMonitor(BaseMonitor):
                     logger.error(f"Failed to subscribe: {data}")
             else:
                 logger.warning("No Futu symbols configured in futu_symbols.yaml")
-            
-            # Start polling task
-            if clean_symbols:
-                self.loop.create_task(self.poll_snapshot(self.ctx, clean_symbols, interval=30))
                 
             # Main loop
             logger.info("HK Monitor is running...")

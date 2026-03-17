@@ -4,7 +4,7 @@ import signal
 import sys
 import yaml
 import os
-import fcntl
+import tempfile
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from longport.openapi import QuoteContext, PushQuote, SubType
@@ -17,21 +17,38 @@ from src.api.dingtalk import DingTalkAlert
 logger = logging.getLogger(__name__)
 
 # Singleton lock to prevent duplicate processes
-LOCK_FILE = "/tmp/us_watchlist_monitor.lock"
+LOCK_FILE = os.path.join(tempfile.gettempdir(), "us_watchlist_monitor.lock")
 
 def ensure_single_instance():
     """Ensure only one instance of us_watchlist_monitor is running"""
-    global _lock_fd
-    _lock_fd = open(LOCK_FILE, 'w')
-    try:
-        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _lock_fd.write(str(os.getpid()))
-        _lock_fd.flush()
-        logger.info(f"Singleton lock acquired (PID: {os.getpid()})")
-        return True
-    except IOError:
-        logger.error("Another instance of us_watchlist_monitor is already running. Exiting.")
-        return False
+    if os.name == 'nt':
+        # Windows implementation using msvcrt
+        import msvcrt
+        global _lock_fd
+        _lock_fd = open(LOCK_FILE, 'w')
+        try:
+            msvcrt.locking(_lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+            _lock_fd.write(str(os.getpid()))
+            _lock_fd.flush()
+            logger.info(f"Singleton lock acquired (PID: {os.getpid()})")
+            return True
+        except (IOError, OSError):
+            logger.error("Another instance of us_watchlist_monitor is already running. Exiting.")
+            return False
+    else:
+        # Unix implementation using fcntl
+        import fcntl
+        global _lock_fd_unix
+        _lock_fd_unix = open(LOCK_FILE, 'w')
+        try:
+            fcntl.flock(_lock_fd_unix, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_fd_unix.write(str(os.getpid()))
+            _lock_fd_unix.flush()
+            logger.info(f"Singleton lock acquired (PID: {os.getpid()})")
+            return True
+        except IOError:
+            logger.error("Another instance of us_watchlist_monitor is already running. Exiting.")
+            return False
 
 from src.monitor.base_monitor import BaseMonitor
 

@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import threading
 from futu import StockQuoteHandlerBase, RET_OK
 from tinydb import TinyDB, Query
 
@@ -9,7 +10,7 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
     """
     Callback handler for Futu quote updates.
     """
-    def __init__(self, loop, thresholds, db=None, alert_handler=None):
+    def __init__(self, loop, thresholds, db=None, alert_handler=None, db_lock=None):
         """
         Initialize the callback handler.
         
@@ -17,12 +18,14 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
         :param thresholds: The threshold configuration dictionary.
         :param db: The TinyDB instance for storing quotes.
         :param alert_handler: Async function to handle alerts (handle_quote_alert).
+        :param db_lock: Threading lock to prevent concurrent writes to TinyDB.
         """
         self.loop = loop
         self.thresholds = thresholds
         self.db = db
         self.alert_handler = alert_handler
         self.Quote = Query()
+        self.db_lock = db_lock or threading.Lock()
         super().__init__()
 
     def on_recv_rsp(self, rsp_pb):
@@ -57,39 +60,43 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
                 
                 # Update TinyDB if available
                 if self.db:
-                    # If prev_close is missing in push, try to get from DB
-                    if prev_close <= 0:
-                        existing = self.db.get(self.Quote.code == code)
-                        if existing and 'prev_close' in existing:
-                            prev_close = float(existing['prev_close'])
+                    try:
+                        with self.db_lock:
+                            # If prev_close is missing in push, try to get from DB
+                            if prev_close <= 0:
+                                existing = self.db.get(self.Quote.code == code)
+                                if existing and 'prev_close' in existing:
+                                    prev_close = float(existing['prev_close'])
 
-                    # Calculate change rate
-                    change_rate = 0.0
-                    change_amount = 0.0
-                    if prev_close > 0:
-                        change_amount = last_price - prev_close
-                        change_rate = (change_amount / prev_close) * 100
-                    
-                    volume = int(row.get('volume', 0))
-                    
-                    # Prepare update data
-                    quote_data = {
-                        'code': code,
-                        'last_price': last_price,
-                        'change_amount': change_amount,
-                        'change_rate': change_rate,
-                        'update_time': row.get('data_time', '') or row.get('time_key', '')
-                    }
-                    
-                    # Only update fields that exist or matter
-                    if prev_close > 0:
-                        quote_data['prev_close'] = prev_close
-                    if volume > 0:
-                        quote_data['volume'] = volume
-                    if 'name' in row:
-                        quote_data['name'] = row['name']
+                            # Calculate change rate
+                            change_rate = 0.0
+                            change_amount = 0.0
+                            if prev_close > 0:
+                                change_amount = last_price - prev_close
+                                change_rate = (change_amount / prev_close) * 100
+                            
+                            volume = int(row.get('volume', 0))
+                            
+                            # Prepare update data
+                            quote_data = {
+                                'code': code,
+                                'last_price': last_price,
+                                'change_amount': change_amount,
+                                'change_rate': change_rate,
+                                'update_time': row.get('data_time', '') or row.get('time_key', '')
+                            }
+                            
+                            # Only update fields that exist or matter
+                            if prev_close > 0:
+                                quote_data['prev_close'] = prev_close
+                            if volume > 0:
+                                quote_data['volume'] = volume
+                            if 'name' in row:
+                                quote_data['name'] = row['name']
 
-                    self.db.upsert(quote_data, self.Quote.code == code)
+                            self.db.upsert(quote_data, self.Quote.code == code)
+                    except Exception as e:
+                        logger.error(f"Error updating TinyDB: {e}")
 
                 # Determine market type from code (e.g., HK.00700 -> HK, US.AAPL -> US)
                 market_type = "HK"
@@ -101,10 +108,14 @@ class FutuQuoteCallback(StockQuoteHandlerBase):
                 # Get name for display
                 name = row.get('name', '')
                 if not name and self.db:
-                    # Try to find name in DB
-                    existing = self.db.get(self.Quote.code == code)
-                    if existing:
-                        name = existing.get('name', '')
+                    try:
+                        with self.db_lock:
+                            # Try to find name in DB
+                            existing = self.db.get(self.Quote.code == code)
+                            if existing:
+                                name = existing.get('name', '')
+                    except Exception as e:
+                        logger.error(f"Error reading TinyDB for name: {e}")
                 
                 display_symbol = f"{code} {name}" if name and name != code else code
 

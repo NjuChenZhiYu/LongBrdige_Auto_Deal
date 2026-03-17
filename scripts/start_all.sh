@@ -32,11 +32,11 @@ mkdir -p logs
 # Set PYTHONPATH
 export PYTHONPATH=$PYTHONPATH:.
 
-# Start Watchlist Monitor Service
-echo "Starting Watchlist Monitor Service..."
-nohup $PYTHON_EXEC -m src.monitor.watchlist_monitor > logs/monitor.log 2>&1 &
+# Start US Watchlist Monitor Service
+echo "Starting US Watchlist Monitor Service..."
+nohup $PYTHON_EXEC -m src.monitor.longport_task > logs/monitor.log 2>&1 &
 MONITOR_PID=$!
-echo "Monitor Service started with PID: $MONITOR_PID (Log: logs/monitor.log)"
+echo "US Monitor Service started with PID: $MONITOR_PID (Log: logs/monitor.log)"
 
 # Start Web Interface
 echo "Starting Web Interface..."

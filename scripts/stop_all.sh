@@ -13,7 +13,7 @@ if [ -f "logs/monitor.pid" ]; then
     rm logs/monitor.pid
 else
     echo "Monitor Service PID file not found. Checking processes..."
-    PIDS=$(ps aux | grep "src.monitor.watchlist_monitor" | grep -v grep | awk '{print $2}')
+    PIDS=$(ps aux | grep "src.monitor.longport_task" | grep -v grep | awk '{print $2}')
     if [ -n "$PIDS" ]; then
         echo "Found running Monitor Service processes: $PIDS. Killing..."
         echo "$PIDS" | xargs kill
