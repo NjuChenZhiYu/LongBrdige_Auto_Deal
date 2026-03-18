@@ -20,9 +20,9 @@ Global_Quant_System/          # (建议改个更宏大的名字，比如这个)
 │   │   │   ├── callback/     # 富途底层是回调机制，对应长桥的 push
 │   │   │   └── ...
 │   │   └── notification.py   # 共享：钉钉/飞书告警模块 (长桥和富途共用它)
-│   ├── analysis/             # 共享：Kimi/Gemini 大模型策略分析引擎
-│   │   ├── llm_engine.py     # 【建议新增】专门负责调用大模型生成研报
-│   │   └── strategy.py       # 共享的异动计算公式 (如 IV 计算、均量对比)
+│   ├── services/             # 【调整】应用服务层
+│   │   ├── llm_analyst.py    # 大模型研报生成服务 (原 analysis/llm_engine)
+│   │   └── signal_recorder.py# 信号记录器
 │   ├── monitor/ 
 │   │   ├── base_monitor.py         # 【新增】监控器抽象基类
 │   │   ├── us_watchlist_monitor.py # 【重命名】美股行情监控器 (原 watchlist_monitor.py)
@@ -59,8 +59,8 @@ Global_Quant_System/          # (建议改个更宏大的名字，比如这个)
 ### 3. 其他核心目录
 | 目录             | 核心职责                                                                 |
 |------------------|--------------------------------------------------------------------------|
-| src/analysis/    | 算法逻辑与业务解耦，输入行情数据返回分析结果（是否触发阈值/信号类型）     |
-| src/monitor/     | 调用长桥订阅接口、分发行情数据到分析模块、触发告警/下单                  |
+| src/services/    | 应用服务层，包含大模型研报生成 (`llm_analyst`) 和信号记录 (`signal_recorder`) |
+| src/monitor/     | 监控核心，包含长桥/富途的监控器实现 (`base_monitor`及其子类) 和任务主控     |
 | src/utils/       | 通用工具（日志初始化、价格计算、异常处理），避免代码重复                 |
 | tests/           | 每个核心模块对应测试用例，覆盖正常/异常/边界场景                        |
 | docs/            | 项目文档，包含部署步骤、API参考、使用说明                                |
