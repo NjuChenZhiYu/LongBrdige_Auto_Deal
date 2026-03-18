@@ -14,7 +14,6 @@
     *   [1. 环境准备](#1-环境准备)
     *   [2. 配置 (安全重要)](#2-配置-安全重要)
     *   [3. 运行](#3-运行)
-*   [实时监控服务](#实时监控服务)
 *   [测试](#测试)
 
 ## 核心功能
@@ -147,18 +146,6 @@ python main.py
 ```
 
 更多部署细节请参考 [docs/deploy.md](docs/deploy.md)。
-
-## 实时监控服务 (Watchlist Monitor)
-
-本项目包含一个基于自选股的 7x24 小时实时监控服务，支持配置热更新、断线重连和多渠道告警。
-
-### 启动服务
-```bash
-python -m src.monitor.watchlist_monitor
-```
-
-### 部署为系统服务
-请参考 [docs/deploy.md](docs/deploy.md) 配置 systemd 服务。
 
 ## 测试
 运行单元测试确保功能正常：
