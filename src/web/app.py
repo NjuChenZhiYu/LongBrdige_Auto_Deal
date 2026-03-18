@@ -299,9 +299,16 @@ def delete_report(report_id):
         logger.error(f"Error deleting report {report_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
+import threading
+us_report_lock = threading.Lock()
+hk_report_lock = threading.Lock()
+
 @app.route('/api/reports/trigger/us', methods=['POST'])
 async def trigger_us_report():
     """Manually trigger US report generation."""
+    if not us_report_lock.acquire(blocking=False):
+        return jsonify({'status': 'error', 'message': 'US report generation is already in progress. Please wait.'}), 429
+        
     try:
         # Run in background or wait? 
         # Since it's an async route, we can await it, but it might take time.
@@ -311,16 +318,23 @@ async def trigger_us_report():
     except Exception as e:
         logger.error(f"Error triggering US report: {e}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        us_report_lock.release()
 
 @app.route('/api/reports/trigger/hk', methods=['POST'])
 async def trigger_hk_report():
     """Manually trigger HK report generation."""
+    if not hk_report_lock.acquire(blocking=False):
+        return jsonify({'status': 'error', 'message': 'HK report generation is already in progress. Please wait.'}), 429
+        
     try:
         await llm_analyst.generate_futu_hk_report(save_to_db=True, trigger_type='MANUAL')
         return jsonify({'status': 'success', 'message': 'HK report generated and saved.'}), 200
     except Exception as e:
         logger.error(f"Error triggering HK report: {e}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        hk_report_lock.release()
 
 from src.api.futu.client import futu_client
 from src.monitor.hk_watchlist_monitor import HKWatchlistMonitor
