@@ -11,7 +11,12 @@ logger = logging.getLogger(__name__)
 # Add project root to path
 sys.path.append(os.getcwd())
 
-from futu import OpenQuoteContext, StockQuoteHandlerBase, RET_OK, SubType
+# Ensure we can import futu
+try:
+    from futu import OpenQuoteContext, StockQuoteHandlerBase, RET_OK, SubType
+except ImportError:
+    print("Futu SDK not found. Install with pip install futu-api")
+    sys.exit(1)
 
 class TestHandler(StockQuoteHandlerBase):
     def on_recv_rsp(self, rsp_pb):
@@ -37,14 +42,26 @@ def test_callback():
         logger.info("Handler set.")
         
         symbol = 'HK.00700' # Tencent
-        logger.info(f"Subscribing to {symbol}...")
+        logger.info(f"Subscribing to {symbol} (TICKER)...")
+        # Try snapshot first
+        logger.info("Testing get_market_snapshot...")
+        ret, data = ctx.get_market_snapshot([symbol])
+        if ret == RET_OK:
+            logger.info(f"Snapshot Data: \n{data}")
+        else:
+            logger.error(f"Snapshot Failed: {data}")
+            
         ret, data = ctx.subscribe([symbol], [SubType.QUOTE], is_first_push=True)
         
+        logger.info(f"Subscribe Ret: {ret}")
         if ret == RET_OK:
             logger.info("Subscription successful.")
-            logger.info(f"Initial data: \n{data}")
+            if data is not None:
+                logger.info(f"Initial data rows: {len(data)}")
+            else:
+                logger.info("Initial data is None")
         else:
-            logger.error(f"Subscription failed: {data}")
+            logger.info(f"Subscription failed: {data}")
             
         logger.info("Waiting for callbacks (30s)...")
         time.sleep(30)
