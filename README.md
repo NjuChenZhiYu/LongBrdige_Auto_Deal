@@ -1,159 +1,142 @@
-# 美股期权实时监控分析系统 (LongBridge Auto Deal)
+[English](README.md) | [中文](README_zh.md)
 
-基于长桥证券 OpenAPI (LongPort SDK) 搭建的工业级美股+期权实时监控分析系统。本项目采用模块化架构设计，支持实时行情订阅、策略分析、多渠道告警及自动交易。
+# LongBridge Auto Deal: US & HK Stock & Options Real-time Monitoring System
 
-## 目录
+An industrial-grade real-time monitoring and analysis system for US and HK stocks & options, built on the LongPort SDK and Futu OpenD. This project adopts a modular architecture and supports real-time market data subscription, strategy analysis, multi-channel alerts, and LLM-powered smart market reports.
 
-*   [核心功能](#核心功能)
-    *   [1. 双市场实时监控体系](#1-双市场实时监控体系)
-    *   [2. LLM 智能研报 (AI Analyst)](#2-llm-智能研报-ai-analyst)
-    *   [3. 精细化告警策略](#3-精细化告警策略)
-    *   [4. 工业级工程设计](#4-工业级工程设计)
-*   [目录结构](#目录结构)
-*   [快速开始](#快速开始)
-    *   [1. 环境准备](#1-环境准备)
-    *   [2. 配置 (安全重要)](#2-配置-安全重要)
-    *   [3. 运行](#3-运行)
-*   [测试](#测试)
+## Table of Contents
 
-## 核心功能
+*   [Core Features](#core-features)
+    *   [1. Dual Market Real-time Monitoring System](#1-dual-market-real-time-monitoring-system)
+    *   [2. LLM Smart Reports (AI Analyst)](#2-llm-smart-reports-ai-analyst)
+    *   [3. Refined Alert Strategy](#3-refined-alert-strategy)
+    *   [4. Industrial-grade Engineering Design](#4-industrial-grade-engineering-design)
+*   [Directory Structure](#directory-structure)
+*   [Quick Start](#quick-start)
+    *   [1. Environment Preparation](#1-environment-preparation)
+    *   [2. Configuration (Security Warning)](#2-configuration-security-warning)
+    *   [3. Run](#3-run)
+*   [Testing](#testing)
 
-### 1. 双市场实时监控体系
-*   **美股 (US)**：基于 **LongPort SDK**，实现毫秒级 WebSocket 行情订阅与期权异动监控。
-*   **港股 (HK)**：基于 **Futu OpenD**，支持自选股自动同步、实时快照轮询与状态缓存。
-*   **独立前端看板**：提供美股/港股独立监控页，支持**实时排序**（涨跌幅/成交量）、**动态阈值管理**及**手动触发检查**。
+## Core Features
 
-### 2. LLM 智能研报 (AI Analyst)
-*   **双引擎架构**：集成 **Google Gemini** (负责美股/期权) 与 **Kimi/Moonshot** (负责港股) 大模型。
-*   **自动化日报**：系统定时聚合全天异动数据，生成盘前/盘中/盘后市场分析报告。
-*   **交互式生成**：Web 界面支持一键手动触发研报生成，实时分析当前市场情绪。
-*   **研报中心**：内置历史研报管理功能，支持 Markdown 富文本渲染与持久化存储。
+### 1. Dual Market Real-time Monitoring System
+*   **US Market**: Based on **LongPort SDK**, providing millisecond-level WebSocket market data subscriptions and options anomaly monitoring.
+*   **HK Market**: Based on **Futu OpenD**, supporting automatic watchlist synchronization, real-time snapshot polling, and state caching.
+*   **Independent Frontend Dashboards**: Offers separate monitoring pages for US and HK markets, supporting **real-time sorting** (price change/volume), **dynamic threshold management**, and **manual trigger checks**.
 
-### 3. 精细化告警策略
-*   **渠道分流**：
-    *   **钉钉 (DingTalk)**：接收美股异动、期权信号及系统级通知。
-    *   **飞书 (Feishu)**：接收港股异动及 LLM 市场研报推送。
-*   **智能去重**：内置信号记录器 (`SignalRecorder`)，在交易日内对同一标的同一类型信号进行去重，防止消息轰炸。
+### 2. LLM Smart Reports (AI Analyst)
+*   **Dual-Engine Architecture**: Integrates **Google Gemini** (for US market/options) and **Kimi/Moonshot** (for HK market) large language models.
+*   **Automated Daily Reports**: System automatically aggregates daily anomaly data to generate pre-market, mid-day, and post-market analysis reports.
+*   **Interactive Generation**: The Web interface supports one-click manual triggering for report generation to analyze current market sentiment in real-time.
+*   **Report Center**: Built-in historical report management with Markdown rich text rendering and persistent storage.
 
-### 4. 工业级工程设计
-*   **配置热更新**：支持通过 Web 界面或配置文件动态调整监控阈值，无需重启服务。
-*   **高可用性**：多进程架构隔离不同市场任务，支持断线自动重连与指数退避策略。
-*   **安全合规**：敏感凭据 (`.env`) 与业务配置分离，严格遵循安全规范。
-### 4.1 双市场实时监控体系
-*   **美股 (US)**：基于 **LongPort SDK**，实现毫秒级 WebSocket 行情订阅与期权异动监控。
-*   **港股 (HK)**：基于 **Futu OpenD**，支持自选股自动同步、实时快照轮询与状态缓存。
-*   **独立前端看板**：提供美股/港股独立监控页，支持**实时排序**（涨跌幅/成交量）、**动态阈值管理**及**手动触发检查**。
+### 3. Refined Alert Strategy
+*   **Channel Routing**:
+    *   **DingTalk**: Receives US market anomalies, options signals, and system-level notifications.
+    *   **Feishu**: Receives HK market anomalies and LLM market report pushes.
+*   **Smart Deduplication**: Built-in signal recorder (`SignalRecorder`) to deduplicate the same type of signals for the same ticker within a trading day, preventing message spam.
 
-### 4.2 LLM 智能研报 (AI Analyst)
-*   **双引擎架构**：集成 **Google Gemini** (负责美股/期权) 与 **Kimi/Moonshot** (负责港股) 大模型。
-*   **自动化日报**：系统定时聚合全天异动数据，生成盘前/盘中/盘后市场分析报告。
-*   **交互式生成**：Web 界面支持一键手动触发研报生成，实时分析当前市场情绪。
-*   **研报中心**：内置历史研报管理功能，支持 Markdown 富文本渲染与持久化存储。
+### 4. Industrial-grade Engineering Design
+*   **Hot Configuration Updates**: Supports dynamically adjusting monitoring thresholds via the Web interface or configuration files without restarting the service.
+*   **High Availability**: Multi-process architecture isolates different market tasks, supporting automatic reconnection on disconnection and exponential backoff strategies.
+*   **Security & Compliance**: Sensitive credentials (`.env`) are separated from business configurations, strictly adhering to security standards.
 
-### 4.3 精细化告警策略
-*   **渠道分流**：
-    *   **钉钉 (DingTalk)**：接收美股异动、期权信号及系统级通知。
-    *   **飞书 (Feishu)**：接收港股异动及 LLM 市场研报推送。
-
-### 4.4 工业级工程设计
-*   **配置热更新**：支持通过 Web 界面或配置文件动态调整监控阈值，无需重启服务。
-*   **高可用性**：多进程架构隔离不同市场任务，支持断线自动重连与指数退避策略。
-
-## 目录结构
+## Directory Structure
 
 ```
 LongBridge_Auto_Deal/
-├── config/             # 配置管理 (敏感配置与应用配置)
+├── config/             # Configuration management (sensitive & app configs)
 │   ├── .env.example
 │   ├── settings.py 
-│   ├── longport_symbols.yaml # 长桥美股/期权配置
-│   └── futu_symbols.yaml     # 富途港股标的与阈值配置
+│   ├── longport_symbols.yaml # LongPort US/Options configs
+│   └── futu_symbols.yaml     # Futu HK targets & threshold configs
 ├── src/
-│   ├── api/            # 外部接口封装
-│   │   ├── longport/   # 长桥 API 核心 (拉取、订阅、推送等)
-│   │   ├── futu/       # 富途 API 核心 (OpenD 客户端、回调)
-│   │   └── notification.py # 飞书/钉钉告警模块
-│   ├── services/       # 应用服务层
-│   │   ├── llm_analyst.py  # 大模型研报生成服务
-│   │   └── signal_recorder.py # 信号记录器
-│   ├── monitor/        # 监控主循环与事件分发
+│   ├── api/            # External API wrappers
+│   │   ├── longport/   # LongPort API core (pull, sub, push, etc.)
+│   │   ├── futu/       # Futu API core (OpenD client, callbacks)
+│   │   └── notification.py # Feishu/DingTalk alert modules
+│   ├── services/       # Application service layer
+│   │   ├── llm_analyst.py  # LLM report generation service
+│   │   └── signal_recorder.py # Signal deduplication recorder
+│   ├── monitor/        # Main monitoring loop & event dispatch
 │   │   ├── base_monitor.py
-│   │   ├── us_watchlist_monitor.py # 美股行情监控器
-│   │   ├── hk_watchlist_monitor.py # 港股行情监控器
-│   │   ├── longport_task.py        # 长桥监控主控
-│   │   └── futu_task.py            # 富途监控主控
-│   └── utils/          # 通用工具 (日志, 价格计算等)
-├── tests/              # 测试与验证脚本
-├── docs/               # 详细文档
-├── main.py             # 程序入口 (多进程启动)
-├── requirements.txt    # 依赖管理
-└── scripts/            # 启动与部署脚本
+│   │   ├── us_watchlist_monitor.py # US market monitor
+│   │   ├── hk_watchlist_monitor.py # HK market monitor
+│   │   ├── longport_task.py        # LongPort monitoring task
+│   │   └── futu_task.py            # Futu monitoring task
+│   └── utils/          # General utilities (logging, price calculation, etc.)
+├── tests/              # Testing & validation scripts
+├── docs/               # Detailed documentation
+├── main.py             # Program entry point (multi-process start)
+├── requirements.txt    # Dependency management
+└── scripts/            # Startup & deployment scripts
 ```
 
-## 快速开始
+## Quick Start
 
-### 1. 环境准备
-确保 Python 3.8+ 环境。建议使用虚拟环境：
+### 1. Environment Preparation
+Ensure Python 3.8+ environment. A virtual environment is recommended:
 ```bash
-# 创建虚拟环境
+# Create virtual environment
 python3 -m venv venv
 
-# 激活虚拟环境 (Linux/macOS)
+# Activate virtual environment (Linux/macOS)
 source venv/bin/activate
 
-# 安装依赖
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. 配置 (安全重要)
-本项目严格遵循安全规范，敏感信息不直接提交到 Git。请按以下步骤配置：
+### 2. Configuration (Security Warning)
+This project strictly follows security guidelines; sensitive information is not submitted to Git. Please follow these steps to configure:
 
-1.  复制配置模板：
+1.  Copy the configuration template:
     ```bash
-    # 推荐方式：在 config 目录下创建 .env
+    # Recommended: create .env in the config directory
     cp config/.env.example config/.env
     ```
 
-2.  编辑 `config/.env` 填入您的 LongBridge Token 和 Webhook 地址。
+2.  Edit `config/.env` and fill in your LongBridge Token, Futu config, and Webhook addresses.
 
-    > **安全提示**：
-    > *   `config/.env` 文件已被 `.gitignore` 忽略，**绝不会**被提交到远程仓库。
-    > *   请确保服务器上的 `config/.env` 文件权限设置为 600 (仅所有者可读写)：
-    >     ```
+    > **Security Warning**:
+    > *   The `config/.env` file is ignored by `.gitignore` and **will never** be committed to the remote repository.
+    > *   Please ensure the `config/.env` file permissions on your server are set to 600 (read/write by owner only):
+    >     ```bash
     >     chmod 600 config/.env
     >     ```
 
-3.  **Futu OpenD 配置** (仅港股需要)：
-    *   安装并启动 [Futu OpenD](https://www.futunn.com/download/OpenD)。
-    *   在 `config/.env` 中配置 `FUTU_HOST` 和 `FUTU_PORT` (默认 11111)。
-    *   确保 OpenD 已登录且 API 监听端口与配置一致。
+3.  **Futu OpenD Configuration** (Required for HK Market only):
+    *   Install and start [Futu OpenD](https://www.futunn.com/download/OpenD).
+    *   Configure `FUTU_HOST` and `FUTU_PORT` (default 11111) in `config/.env`.
+    *   Ensure OpenD is logged in and the API listening port matches your configuration.
 
-4.  **LLM 密钥配置** (智能研报需要)：
-    *   在 `config/.env` 中填入 `LLM_API_KEY` (Gemini) 和 `KIMI_API_KEY` (Moonshot)。
+4.  **LLM Key Configuration** (Required for Smart Reports):
+    *   Fill in `LLM_API_KEY` (Gemini) and `KIMI_API_KEY` (Moonshot) in `config/.env`.
 
-### 3. 运行
+### 3. Run
 
-#### Windows (推荐)
-使用 PowerShell 脚本一键启动所有服务（无需手动激活虚拟环境）：
+#### Windows (Recommended)
+Use the PowerShell script to start all services with one click (no need to manually activate the virtual environment):
 ```powershell
-# 启动服务 (监控 + Web)
+# Start services (Monitor + Web)
 ./scripts/start_all.ps1
 
-# 停止服务
+# Stop services
 ./scripts/stop_all.ps1
 ```
 
 #### Linux/macOS
 ```bash
-# 启动服务
+# Start services
 ./scripts/start_all.sh
 
-# 停止服务
+# Stop services
 ./scripts/stop_all.sh
 ```
 
-#### 手动运行 (开发调试)
-如果您想手动运行单个 Python 文件，需要先激活虚拟环境：
+#### Run Manually (Development & Debugging)
+If you want to manually run a single Python file, you need to activate the virtual environment first:
 ```bash
 # Windows
 venv\Scripts\activate
@@ -164,10 +147,10 @@ source venv/bin/activate
 python main.py
 ```
 
-更多部署细节请参考 [docs/deploy.md](docs/deploy.md)。
+For more deployment details, please refer to [docs/deploy.md](docs/deploy.md).
 
-## 测试
-运行单元测试确保功能正常：
+## Testing
+Run unit tests to ensure everything is working correctly:
 ```bash
 python -m unittest discover tests
 ```
