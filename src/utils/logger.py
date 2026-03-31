@@ -1,8 +1,9 @@
 import logging
+from logging.handlers import RotatingFileHandler
 import sys
 import os
 
-def setup_logger(name: str, log_file: str = "monitor.log", level=logging.INFO):
+def setup_logger(name: str, log_file: str = "logs/monitor.log", level=logging.INFO):
     """
     Setup a logger with console and file handlers
     """
@@ -28,7 +29,12 @@ def setup_logger(name: str, log_file: str = "monitor.log", level=logging.INFO):
         os.makedirs(log_dir)
         
     try:
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler = RotatingFileHandler(
+            log_file, 
+            maxBytes=10 * 1024 * 1024, 
+            backupCount=3, 
+            encoding='utf-8'
+        )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     except Exception as e:
