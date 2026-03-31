@@ -130,15 +130,15 @@ def start_option_monitor():
     t.start()
     logger.info("Option Monitor thread started")
 
-def scheduled_us_report_job(save_to_db=False):
+def scheduled_us_report_job():
     """Wrapper for US scheduled report generation"""
-    logger.info(f"Running scheduled US report generation (save_to_db={save_to_db})...")
-    asyncio.run(llm_analyst.generate_longport_us_report(save_to_db=save_to_db, trigger_type='CRON'))
+    logger.info("Running scheduled US report generation...")
+    asyncio.run(llm_analyst.generate_longport_us_report(trigger_type='CRON'))
 
-def scheduled_hk_report_job(save_to_db=False):
+def scheduled_hk_report_job():
     """Wrapper for HK scheduled report generation"""
-    logger.info(f"Running scheduled HK report generation (save_to_db={save_to_db})...")
-    asyncio.run(llm_analyst.generate_futu_hk_report(save_to_db=save_to_db, trigger_type='CRON'))
+    logger.info("Running scheduled HK report generation...")
+    asyncio.run(llm_analyst.generate_futu_hk_report(trigger_type='CRON'))
 
 # Scheduler Setup
 scheduler = BackgroundScheduler(timezone=CST_TZ)
@@ -147,13 +147,13 @@ scheduler = BackgroundScheduler(timezone=CST_TZ)
 # scheduler.add_job(scheduled_job, 'cron', hour=7, minute=50)
 
 # LLM Report Schedules
-# US Market: 22:50 (In-market, No Save), 07:50 (Post-market, Save)
-scheduler.add_job(scheduled_us_report_job, 'cron', hour=22, minute=50, kwargs={'save_to_db': False})
-scheduler.add_job(scheduled_us_report_job, 'cron', hour=7, minute=50, kwargs={'save_to_db': True})
+# US Market: 22:50 (In-market), 07:50 (Post-market)
+scheduler.add_job(scheduled_us_report_job, 'cron', hour=22, minute=50)
+scheduler.add_job(scheduled_us_report_job, 'cron', hour=7, minute=50)
 
-# HK Market: 10:00 (Morning, No Save), 15:20 (Afternoon, Save)
-scheduler.add_job(scheduled_hk_report_job, 'cron', hour=10, minute=0, kwargs={'save_to_db': False})
-scheduler.add_job(scheduled_hk_report_job, 'cron', hour=15, minute=20, kwargs={'save_to_db': True})
+# HK Market: 10:00 (Morning), 15:20 (Afternoon)
+scheduler.add_job(scheduled_hk_report_job, 'cron', hour=10, minute=0)
+scheduler.add_job(scheduled_hk_report_job, 'cron', hour=15, minute=20)
 
 scheduler.start()
 
@@ -313,8 +313,8 @@ async def trigger_us_report():
         # Run in background or wait? 
         # Since it's an async route, we can await it, but it might take time.
         # For better UX, we might want to return immediately, but for simplicity/feedback let's await.
-        await llm_analyst.generate_longport_us_report(save_to_db=True, trigger_type='MANUAL')
-        return jsonify({'status': 'success', 'message': 'US report generated and saved.'}), 200
+        await llm_analyst.generate_longport_us_report(trigger_type='MANUAL')
+        return jsonify({"status": "success", "message": "US report generated."}), 200
     except Exception as e:
         logger.error(f"Error triggering US report: {e}")
         return jsonify({'error': str(e)}), 500
@@ -328,8 +328,8 @@ async def trigger_hk_report():
         return jsonify({'status': 'error', 'message': 'HK report generation is already in progress. Please wait.'}), 429
         
     try:
-        await llm_analyst.generate_futu_hk_report(save_to_db=True, trigger_type='MANUAL')
-        return jsonify({'status': 'success', 'message': 'HK report generated and saved.'}), 200
+        await llm_analyst.generate_futu_hk_report(trigger_type='MANUAL')
+        return jsonify({'status': 'success', 'message': 'HK report generated.'}), 200
     except Exception as e:
         logger.error(f"Error triggering HK report: {e}")
         return jsonify({'error': str(e)}), 500

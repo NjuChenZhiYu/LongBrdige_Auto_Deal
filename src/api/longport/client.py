@@ -151,5 +151,77 @@ class LongPortClient:
             logger.error(f"Error fetching LongPort threshold quotes: {e}")
             return []
 
+    async def get_capital_flow(self, symbol: str):
+        """
+        Get capital flow distribution for a US stock.
+        """
+        try:
+            ctx = await self.get_quote_context()
+            res = await ctx.capital_distribution(symbol)
+            return res
+        except Exception as e:
+            logger.error(f"Error getting capital distribution for {symbol}: {e}")
+            return None
+
+    def analyze_us_capital_flow(self, capital_data, current_price_change: float):
+        """
+        Analyze capital flow to determine market state for US stocks.
+        Returns: (flow_label, smart_money_net, retail_money_net)
+        """
+        if capital_data is None:
+             return "数据缺失", 0, 0
+             
+        try:
+            cap_in = capital_data.capital_in
+            cap_out = capital_data.capital_out
+            
+            in_large = getattr(cap_in, "large", 0) or 0
+            out_large = getattr(cap_out, "large", 0) or 0
+            
+            in_mid = getattr(cap_in, "medium", 0) or 0
+            in_small = getattr(cap_in, "small", 0) or 0
+            out_mid = getattr(cap_out, "medium", 0) or 0
+            out_small = getattr(cap_out, "small", 0) or 0
+            
+            # LongPort API does not have "super" (特大单), so we use "large" (大单) as Smart Money
+            # Smart Money Net = Large In - Large Out
+            smart_net = in_large - out_large
+            
+            # Retail Money Net = (Mid In + Small In) - (Mid Out + Small Out)
+            retail_net = (in_mid + in_small) - (out_mid + out_small)
+            
+            # Convert to Wan (Ten Thousand) for display
+            smart_net_wan = smart_net / 10000
+            retail_net_wan = retail_net / 10000
+            
+            label = "资金博弈不明"
+            
+            # Logic from strategy doc
+            # 1. 【主力洗盘 / 机构吸筹】
+            # Price drop, Smart Net > 0, Retail Net < 0
+            if current_price_change < 0 and smart_net > 0 and retail_net < 0:
+                label = "【主力洗盘 / 机构吸筹】"
+                
+            # 2. 【机构出逃 / 踩踏砸盘】
+            # Price drop, Smart Net < 0
+            elif current_price_change < 0 and smart_net < 0:
+                 label = "【机构出逃 / 踩踏砸盘】"
+                 
+            # 3. 【主力抢筹 / 主升浪】
+            # Price rise, Smart Net > 0
+            elif current_price_change > 0 and smart_net > 0:
+                label = "【主力抢筹 / 主升浪】"
+                
+            # 4. 【庄家诱多 / 诱多出货】
+            # Price rise, Smart Net < 0, Retail Net > 0
+            elif current_price_change > 0 and smart_net < 0 and retail_net > 0:
+                label = "【庄户诱多 / 诱多出货】"
+            
+            return label, round(smart_net_wan, 2), round(retail_net_wan, 2)
+            
+        except Exception as e:
+            logger.error(f"Error analyzing US capital flow: {e}")
+            return "分析错误", 0, 0
+
 # Global client instance
 longport_client = LongPortClient()

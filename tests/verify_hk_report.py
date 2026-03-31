@@ -65,7 +65,7 @@ async def run_verification():
                 
                 print("\nCalling generate_futu_hk_report...")
                 try:
-                    await analyst.generate_futu_hk_report(threshold=5.0, save_to_db=False, trigger_type='MANUAL')
+                    await analyst.generate_futu_hk_report(threshold=5.0, trigger_type='MANUAL')
                     print("\nVerification SUCCESS: Report generated without error.")
                 except Exception as e:
                     print(f"\nVerification FAILED: {e}")

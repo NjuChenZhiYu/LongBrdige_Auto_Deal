@@ -118,3 +118,6 @@ class Settings:
     KIMI_API_KEY = os.getenv("KIMI_API_KEY")
     KIMI_LLM_BASE_URL = os.getenv("KIMI_LLM_BASE_URL", "https://api.moonshot.cn/v1")
     KIMI_LLM_MODEL = os.getenv("KIMI_LLM_MODEL", "kimi-k2.5")
+
+    # Adanos Sentiment API
+    ADANOS_API_KEY = os.getenv("ADANOS_API_KEY")
