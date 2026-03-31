@@ -140,6 +140,16 @@ def scheduled_hk_report_job(save_to_db=False):
     logger.info(f"Running scheduled HK report generation (save_to_db={save_to_db})...")
     asyncio.run(llm_analyst.generate_futu_hk_report(save_to_db=save_to_db, trigger_type='CRON'))
 
+def scheduled_log_cleanup():
+    """Wrapper for cleaning up old Futu logs"""
+    logger.info("Running scheduled log cleanup...")
+    try:
+        from src.utils.log_cleaner import clean_futu_logs
+        # Keep logs for the last 5 days
+        clean_futu_logs(days_to_keep=5)
+    except Exception as e:
+        logger.error(f"Scheduled log cleanup failed: {e}")
+
 # Scheduler Setup
 scheduler = BackgroundScheduler(timezone=CST_TZ)
 # Existing alerts (keep as is or adjust if needed, assuming these are general checks)
@@ -154,6 +164,9 @@ scheduler.add_job(scheduled_us_report_job, 'cron', hour=7, minute=50, kwargs={'s
 # HK Market: 10:00 (Morning, No Save), 15:20 (Afternoon, Save)
 scheduler.add_job(scheduled_hk_report_job, 'cron', hour=10, minute=0, kwargs={'save_to_db': False})
 scheduler.add_job(scheduled_hk_report_job, 'cron', hour=15, minute=20, kwargs={'save_to_db': True})
+
+# Daily Log Cleanup (Run at 03:00 AM every day)
+scheduler.add_job(scheduled_log_cleanup, 'cron', hour=3, minute=0)
 
 scheduler.start()
 
@@ -299,16 +312,9 @@ def delete_report(report_id):
         logger.error(f"Error deleting report {report_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
-import threading
-us_report_lock = threading.Lock()
-hk_report_lock = threading.Lock()
-
 @app.route('/api/reports/trigger/us', methods=['POST'])
 async def trigger_us_report():
     """Manually trigger US report generation."""
-    if not us_report_lock.acquire(blocking=False):
-        return jsonify({'status': 'error', 'message': 'US report generation is already in progress. Please wait.'}), 429
-        
     try:
         # Run in background or wait? 
         # Since it's an async route, we can await it, but it might take time.
@@ -318,23 +324,16 @@ async def trigger_us_report():
     except Exception as e:
         logger.error(f"Error triggering US report: {e}")
         return jsonify({'error': str(e)}), 500
-    finally:
-        us_report_lock.release()
 
 @app.route('/api/reports/trigger/hk', methods=['POST'])
 async def trigger_hk_report():
     """Manually trigger HK report generation."""
-    if not hk_report_lock.acquire(blocking=False):
-        return jsonify({'status': 'error', 'message': 'HK report generation is already in progress. Please wait.'}), 429
-        
     try:
         await llm_analyst.generate_futu_hk_report(save_to_db=True, trigger_type='MANUAL')
         return jsonify({'status': 'success', 'message': 'HK report generated and saved.'}), 200
     except Exception as e:
         logger.error(f"Error triggering HK report: {e}")
         return jsonify({'error': str(e)}), 500
-    finally:
-        hk_report_lock.release()
 
 from src.api.futu.client import futu_client
 from src.monitor.hk_watchlist_monitor import HKWatchlistMonitor

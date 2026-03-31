@@ -7,29 +7,12 @@ import logging
 # Ensure project root is in path
 sys.path.append(os.getcwd())
 
-def setup_logger(name, log_file):
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler = logging.FileHandler(log_file)
-    handler.setFormatter(formatter)
-    
-    # Configure root logger to capture all module logs
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    # Clear existing handlers to avoid duplication
-    if root.handlers:
-        root.handlers.clear()
-    root.addHandler(handler)
-    
-    # Also output to stdout for debugging
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    root.addHandler(console_handler)
-    
-    return logging.getLogger(name)
+# setup_logger function has been migrated to src/utils/logger.py
 
 def start_longport_process():
     try:
         # Re-configure logging for this process
+        from src.utils.logger import setup_logger
         logger = setup_logger("LongPort", "logs/longport_monitor.log")
         logger.info(f"Initializing LongPort Monitor... Executable: {sys.executable}")
         logger.info(f"Sys Path: {sys.path}")
@@ -47,6 +30,7 @@ def start_longport_process():
 def start_futu_process():
     try:
         # Re-configure logging for this process
+        from src.utils.logger import setup_logger
         logger = setup_logger("Futu", "logs/futu_monitor.log")
         logger.info(f"Initializing Futu Monitor... Executable: {sys.executable}")
         logger.info(f"Sys Path: {sys.path}")

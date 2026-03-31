@@ -293,14 +293,8 @@ class USWatchlistMonitor(BaseMonitor):
              pass
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler("monitor.log")
-        ]
-    )
+    from src.utils.logger import setup_logger
+    logger = setup_logger("us_watchlist_monitor", "logs/monitor.log")
 
     # Check singleton lock
     if not ensure_single_instance():
