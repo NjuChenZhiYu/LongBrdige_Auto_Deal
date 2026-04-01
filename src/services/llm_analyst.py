@@ -10,7 +10,7 @@ from src.api.feishu import FeishuAlert
 from datetime import datetime
 from src.api.longport.personalized.watchlist import get_watchlist
 from src.api.longport.client import longport_client
-from src.storage import db_manager
+from src.api.adanos_client import adanos_client
 
 logger = logging.getLogger(__name__)
 
@@ -28,28 +28,18 @@ class LLMAnalyst:
         self.hk_model = Settings.KIMI_LLM_MODEL
         self.hk_client = AsyncOpenAI(api_key=self.hk_api_key, base_url=self.hk_base_url) if self.hk_api_key else None
         
-        # Options report system prompt (existing)
-        self.options_system_prompt = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
+        # Options report prompt (merged)
+        self.options_prompt_template = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
 请根据这些数据（如 IV 飙升、成交量激增突破 OI 的 20%、Delta 突破 0.5），为我撰写一份专业的市场复盘报告。
-        要求：
-        1. 识别出是否有机构(Smart Money)在大量建仓或平仓。
-        2. 分析 IV 的变化意味着市场在定价什么潜在事件（如临床数据发布、财报等）。
-        3. 语言风格要专业、精炼，直接给出结论和潜在的交易风险。
-        4. 使用 Markdown 格式输出，字数控制在 300 字以内。
-        """
-        
-        # HK Stock report system prompt (optimized for Kimi)
-        self.hk_stock_system_prompt = """你是一位资深的港股市场分析师，擅长港股通、科技股和中资股的异动分析。
-请基于提供的港股数据撰写专业的市场观察日报。
+
 要求：
-1. 市场整体研判：基于涨跌分布和平均涨跌，判断港股市场情绪（乐观/谨慎/观望/恐慌）。
-2. 板块/热点分析：识别是否有明显的板块集中异动（如科技股、金融股、地产股的集体异动）。
-3. 重点个股点评：挑选2-3只最具代表性的港股进行简要点评，包括代码和名称。
-4. 资金流向：分析是否有明显的南向资金或机构资金动向。
-5. 次日展望：基于当前港股状态，给出简要的投资策略建议或风险提示。
-6. 语言风格：专业、有洞察，结合港股特有的市场环境（如受美股影响、A股联动等）。
-7. 格式：使用 Markdown，字数控制在 350-450 字之间。
-"""
+1. 识别出是否有机构(Smart Money)在大量建仓或平仓。
+2. 分析 IV 的变化意味着市场在定价什么潜在事件（如临床数据发布、财报等）。
+3. 语言风格要专业、精炼，直接给出结论和潜在的交易风险。
+4. 使用 Markdown 格式输出，字数控制在 300 字以内。
+
+今日期权异动数据:
+{signal_text}"""
 
     async def generate_options_report(self):
         """
@@ -64,9 +54,11 @@ class LLMAnalyst:
         logger.info(f"Generating options report for {len(signals)} signals...")
         
         # Format signals for prompt
-        signal_text = "今日期权异动数据:\n"
+        signal_text = ""
         for i, s in enumerate(signals, 1):
             signal_text += f"{i}. {s['timestamp']} - {s['symbol']} - {s['type']} - Value: {s['value']} (Threshold: {s['threshold']})\n"
+            
+        prompt = self.options_prompt_template.format(signal_text=signal_text)
 
         try:
             if not self.us_client:
@@ -78,8 +70,7 @@ class LLMAnalyst:
                     stream = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
-                            {"role": "system", "content": self.options_system_prompt},
-                            {"role": "user", "content": signal_text}
+                            {"role": "user", "content": prompt}
                         ],
                         max_tokens=3000,
                         temperature=0.7,
@@ -122,7 +113,7 @@ class LLMAnalyst:
             # Clear signals after report
             signal_recorder.clear_signals()
 
-    async def generate_longport_us_report(self, save_to_db: bool = False, trigger_type: str = 'CRON'):
+    async def generate_longport_us_report(self, trigger_type: str = 'CRON'):
         """
         Generate daily US stock market report using real-time data from LongPort watchlist.
         Fetches watchlist stocks that exceed threshold and generates analysis.
@@ -159,57 +150,61 @@ class LLMAnalyst:
                 return
             
             # Save anomaly stocks if requested
-            if save_to_db:
-                for stock in threshold_stocks:
-                    db_manager.upsert_anomaly_stock(
-                        report_date=today_date,
-                        market='US',
-                        symbol=stock['symbol'],
-                        name=stock.get('name', ''),
-                        price=stock['last_price'],
-                        change_pct=stock['change_rate'],
-                        flow_label=None, # Not available for US yet
-                        smart_net=0.0,
-                        retail_net=0.0
-                    )
-                logger.info(f"Saved {len(threshold_stocks)} anomaly stocks to DB.")
-
             # Calculate stats
             up_count = sum(1 for s in threshold_stocks if s['change_rate'] > 0)
             down_count = len(threshold_stocks) - up_count
             avg_change = sum(s['change_rate'] for s in threshold_stocks) / len(threshold_stocks) if threshold_stocks else 0.0
 
-            # Format alerts for prompt
-            alert_text = f"【{market_name}市场日报 - {current_time}】\n\n"
-            alert_text += f"**市场整体概况**：\n"
-            alert_text += f"- 异动标的总数：{len(threshold_stocks)} 只\n"
-            alert_text += f"- 上涨家数：{up_count} 只 | 下跌家数：{down_count} 只\n"
-            alert_text += f"- 平均涨跌幅：{avg_change:+.2f}%\n\n"
-            alert_text += f"**异动标的详情**：\n"
+            # Build stock details with names
+            stock_details = []
             
-            for i, stock in enumerate(threshold_stocks[:15], 1):  # Limit to 15 stocks
-                direction = "上涨" if stock['change_rate'] > 0 else "下跌"
-                alert_text += f"{i}. {stock['symbol']}: 现价 ${stock['last_price']:.2f}, {direction} {stock['change_rate']:+.2f}%\n"
+            for i, stock in enumerate(threshold_stocks[:15], 1):
+                symbol = stock.get('symbol', 'Unknown')
+                price = stock['last_price']
+                change = stock['change_rate']
+                direction = "📈" if change > 0 else "📉"
+                
+                # Fetch sentiment labels from Adanos API
+                sentiment_labels = await adanos_client.get_sentiment_labels(symbol)
+                sentiment_text = f" [{', '.join(sentiment_labels)}]" if sentiment_labels else ""
+                
+                # Fetch capital flow data from LongPort
+                try:
+                    capital_data = await longport_client.get_capital_flow(symbol)
+                    flow_label, smart_net, retail_net = longport_client.analyze_us_capital_flow(capital_data, change)
+                except Exception as e:
+                    logger.error(f"Failed to get US capital flow for {symbol}: {e}")
+                    flow_label, smart_net, retail_net = "分析不可用", 0, 0
+                
+                stock_details.append(
+                    f"{i}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}{sentiment_text}\n"
+                    f"   - 【内部量化系统研判】：{flow_label}\n"
+                    f"   - (资金支撑：主力净流 {smart_net}万, 散户净流 {retail_net}万)"
+                )
             
-            # US market - use standard prompt
-            prompt = f"""作为专业股票分析师，请基于以下{market_name}自选股中**涨跌幅超过 {threshold}% 阈值**的标的列表，生成一份投资分析研报。
+            stocks_text = "\n".join(stock_details)
+            
+            # Build prompt for Gemini
+            prompt = f"""你是一个顶级的量化分析师。以下是触发监控阈值的异动美股股票列表及【底层资金流向数据】与【市场情绪标签】：
 
-【数据概览】
-{alert_text}
+【报告时间】{current_time}
 
-【研报要求】（严格遵循）
-1. 字数：300-500 字之间，必须完整，不要截断
-2. 结构：
-   - 整体研判：基于上述列表，判断当前市场情绪（50-80字）
-   - 板块分析：如有明显的板块集中特征，请指出（80-100字）
-   - 重点点评：挑选2-3只最具代表性的股票进行简要点评（100-150字）
-   - 投资建议：基于当前数据给出策略建议或风险提示（70-100字）
-3. 语言：专业、简洁、有洞察
-4. 重要：必须生成完整内容，在500字内完成所有分析，不要出现未完成的句子
+【市场整体概况】
+- 异动标的总数：{len(threshold_stocks)} 只
+- 上涨家数：{up_count} 只 | 下跌家数：{down_count} 只
+- 平均涨跌幅：{avg_change:+.2f}%
+- 监控阈值：涨跌幅绝对值 ≥ {threshold}%
 
-请直接输出研报正文，不要包含标题、格式说明或字数标注。"""
-            system_prompt = "你是一位资深的股票分析师，擅长基于具体数据进行市场研判。"
+【异动标的详情】
+{stocks_text}
 
+请严格按照以下结构和字数要求，生成一份专业的市场快报：
+1. **市场综述**（80-100字）：基于涨跌分布判断市场整体情绪。
+2. **板块热点**（80-100字）：识别是否有生物医药、机器人、AI、半导体等板块的集中异动。
+3. **重点个股深度剖析**（200-350字）：必须将【内部量化系统研判】（代表真实的资金博弈，如主力洗盘、机构出逃）与附带的【情绪标签】（代表市场舆情和散户情绪）结合分析。重点寻找二者的“共振”（如情绪高涨且主力资金净流入，强化上涨逻辑）或“背离”（如情绪高涨但主力暗中出逃，提示诱多陷阱；情绪低迷但主力暗中吸筹，提示洗盘机会）。深度点评主散博弈状态，刺穿涨跌幅的表象，揭示背后的真实交易逻辑。
+4. **具体交易策略**（100-150字）：拒绝宏观套话（如“谨慎乐观”、“重个股轻指数”），必须**直接点名上述异动标的**给出具体的实操建议。明确指出哪些标的（结合资金与情绪数据）可顺势跟多，哪些标的（如主力暗中出逃）存在诱多风险需坚决规避或逢高做空，哪些建议观望。要求观点鲜明、一针见血。
+
+语言要求：专业、简洁、有美股特色，使用 Markdown 格式，字数350-450字。"""
             # Call LLM with retry
             if not self.us_client:
                 raise ValueError("US LLM client not initialized")
@@ -224,7 +219,6 @@ class LLMAnalyst:
                     stream = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
-                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
                         ],
                         max_tokens=4000,  # Increased max_tokens
@@ -273,19 +267,10 @@ class LLMAnalyst:
                 symbol="MARKET_REPORT",
                 reason="live_analysis"
             )
-
-            # Save report to DB if requested
-            if save_to_db and report_content:
-                db_manager.append_daily_report(
-                    report_date=today_date,
-                    market='US',
-                    trigger_type=trigger_type,
-                    report_content=report_content
-                )
-                logger.info("Saved US daily report to DB.")
                 
         except Exception as e:
-            logger.error(f"US Stock report generation failed: {e}")
+            import traceback
+            logger.error(f"US Stock report generation failed: {e}\n{traceback.format_exc()}")
             # Send fallback
             error_msg = f"AI 研报生成失败: {str(e)[:200]}"
             await DingTalkAlert.send_alert(
@@ -295,7 +280,7 @@ class LLMAnalyst:
                 reason="error"
             )
 
-    async def generate_futu_hk_report(self, threshold: float = None, save_to_db: bool = False, trigger_type: str = 'CRON'):
+    async def generate_futu_hk_report(self, threshold: float = None, trigger_type: str = 'CRON'):
         """
         Generate HK market report specifically for Futu data using Kimi.
         This is the dedicated method for Futu HK stock analysis.
@@ -338,7 +323,6 @@ class LLMAnalyst:
             
             # Build stock details with names
             stock_details = []
-            stocks_to_save = []
             
             for i, stock in enumerate(threshold_stocks[:15], 1):
                 symbol = stock.get('symbol', stock.get('code', 'Unknown'))
@@ -355,40 +339,12 @@ class LLMAnalyst:
                     logger.error(f"Failed to get capital flow for {code}: {e}")
                     flow_label, smart_net, retail_net = "分析不可用", 0, 0
                 
-                if save_to_db:
-                    stocks_to_save.append({
-                        'report_date': today_date,
-                        'market': 'HK',
-                        'symbol': code,
-                        'name': stock.get('name', ''),
-                        'price': price,
-                        'change_pct': change,
-                        'flow_label': flow_label,
-                        'smart_net': smart_net,
-                        'retail_net': retail_net
-                    })
-
                 stock_details.append(
                     f"{i}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}\n"
                     f"   - 【内部量化系统研判】：{flow_label}\n"
                     f"   - (资金支撑：主力净流 {smart_net}万, 散户净流 {retail_net}万)"
                 )
             
-            if save_to_db:
-                for s in stocks_to_save:
-                    db_manager.upsert_anomaly_stock(
-                        report_date=s['report_date'],
-                        market=s['market'],
-                        symbol=s['symbol'],
-                        name=s['name'],
-                        price=s['price'],
-                        change_pct=s['change_pct'],
-                        flow_label=s['flow_label'],
-                        smart_net=s['smart_net'],
-                        retail_net=s['retail_net']
-                    )
-                logger.info(f"Saved {len(stocks_to_save)} HK anomaly stocks to DB.")
-
             stocks_text = "\n".join(stock_details)
             
             # Build prompt for Gemini
@@ -409,7 +365,7 @@ class LLMAnalyst:
 1. **市场综述**（80-100字）：基于涨跌分布判断市场整体情绪。
 2. **板块热点**（80-100字）：识别是否有机器人、物流、航天、能源、半导体等板块的集中异动。
 3. **重点个股与资金博弈**（200-350字）：结合系统提供的【内部量化系统研判】标签（如：主力洗盘、机构出逃），深度点评主力和散户的博弈状态，刺穿涨跌幅的表象。
-4. **策略建议**（70-100字）：基于资金流向和宏观基本面，给出冷血、理性的操作建议。
+4. **具体交易策略**（100-150字）：拒绝宏观套话（如“谨慎乐观”、“重个股轻指数”），必须**直接点名上述异动标的**给出具体的实操建议。明确指出哪些标的（结合资金数据）可顺势跟多，哪些标的（如机构出逃）存在诱多风险需坚决规避或逢高做空，哪些建议观望。要求观点鲜明、一针见血。
 
 语言要求：专业、简洁、有港股特色，使用 Markdown 格式，字数350-450字。"""
 
@@ -424,10 +380,9 @@ class LLMAnalyst:
                     stream = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
-                            {"role": "system", "content": self.hk_stock_system_prompt},
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=4500,
+                        max_tokens=4000,
                         temperature=0.7,
                         stream=True
                     )
@@ -470,19 +425,10 @@ class LLMAnalyst:
             title = f"[Gemini研报] 港股市场观察 ({current_time})"
             await FeishuAlert.send_alert(title, full_report)
             logger.info(f"[Gemini/Futu] Report sent to Feishu successfully")
-            
-            # Save report content
-            if save_to_db and report_content:
-                db_manager.append_daily_report(
-                    report_date=today_date,
-                    market='HK',
-                    trigger_type=trigger_type,
-                    report_content=report_content
-                )
-                logger.info(f"Saved HK daily report to DB.")
                 
         except Exception as e:
-            logger.error(f"[Gemini/Futu] Failed to generate HK report: {e}")
+            import traceback
+            logger.error(f"[Gemini/Futu] Failed to generate HK report: {e}\n{traceback.format_exc()}")
             # Send error notification
             error_title = f"[Gemini研报] 港股报告生成失败 ({current_time})"
             error_content = f"❌ **报告生成失败**\n\n错误信息：{str(e)[:200]}\n\n请检查：\n1. LLM_API_KEY (Gemini) 是否配置正确\n2. 富途API连接是否正常\n3. 网络连接状态"
