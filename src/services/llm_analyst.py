@@ -28,28 +28,18 @@ class LLMAnalyst:
         self.hk_model = Settings.KIMI_LLM_MODEL
         self.hk_client = AsyncOpenAI(api_key=self.hk_api_key, base_url=self.hk_base_url) if self.hk_api_key else None
         
-        # Options report system prompt (existing)
-        self.options_system_prompt = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
+        # Options report prompt (merged)
+        self.options_prompt_template = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
 请根据这些数据（如 IV 飙升、成交量激增突破 OI 的 20%、Delta 突破 0.5），为我撰写一份专业的市场复盘报告。
-        要求：
-        1. 识别出是否有机构(Smart Money)在大量建仓或平仓。
-        2. 分析 IV 的变化意味着市场在定价什么潜在事件（如临床数据发布、财报等）。
-        3. 语言风格要专业、精炼，直接给出结论和潜在的交易风险。
-        4. 使用 Markdown 格式输出，字数控制在 300 字以内。
-        """
-        
-        # HK Stock report system prompt (optimized for Kimi)
-        self.hk_stock_system_prompt = """你是一位资深的港股市场分析师，擅长港股通、科技股和中资股的异动分析。
-请基于提供的港股数据撰写专业的市场观察日报。
+
 要求：
-1. 市场整体研判：基于涨跌分布和平均涨跌，判断港股市场情绪（乐观/谨慎/观望/恐慌）。
-2. 板块/热点分析：识别是否有明显的板块集中异动（如科技股、金融股、地产股的集体异动）。
-3. 重点个股点评：挑选2-3只最具代表性的港股进行简要点评，包括代码和名称。
-4. 资金流向：分析是否有明显的南向资金或机构资金动向。
-5. 次日展望：基于当前港股状态，给出简要的投资策略建议或风险提示。
-6. 语言风格：专业、有洞察，结合港股特有的市场环境（如受美股影响、A股联动等）。
-7. 格式：使用 Markdown，字数控制在 350-450 字之间。
-"""
+1. 识别出是否有机构(Smart Money)在大量建仓或平仓。
+2. 分析 IV 的变化意味着市场在定价什么潜在事件（如临床数据发布、财报等）。
+3. 语言风格要专业、精炼，直接给出结论和潜在的交易风险。
+4. 使用 Markdown 格式输出，字数控制在 300 字以内。
+
+今日期权异动数据:
+{signal_text}"""
 
     async def generate_options_report(self):
         """
@@ -64,9 +54,11 @@ class LLMAnalyst:
         logger.info(f"Generating options report for {len(signals)} signals...")
         
         # Format signals for prompt
-        signal_text = "今日期权异动数据:\n"
+        signal_text = ""
         for i, s in enumerate(signals, 1):
             signal_text += f"{i}. {s['timestamp']} - {s['symbol']} - {s['type']} - Value: {s['value']} (Threshold: {s['threshold']})\n"
+            
+        prompt = self.options_prompt_template.format(signal_text=signal_text)
 
         try:
             if not self.us_client:
@@ -78,8 +70,7 @@ class LLMAnalyst:
                     stream = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
-                            {"role": "system", "content": self.options_system_prompt},
-                            {"role": "user", "content": signal_text}
+                            {"role": "user", "content": prompt}
                         ],
                         max_tokens=3000,
                         temperature=0.7,
@@ -210,12 +201,10 @@ class LLMAnalyst:
 请严格按照以下结构和字数要求，生成一份专业的市场快报：
 1. **市场综述**（80-100字）：基于涨跌分布判断市场整体情绪。
 2. **板块热点**（80-100字）：识别是否有生物医药、机器人、AI、半导体等板块的集中异动。
-3. **重点个股与资金博弈**（200-350字）：结合系统提供的【内部量化系统研判】标签（如：主力洗盘、机构出逃）以及附带的【情绪标签】（如存在），深度点评主力和散户的博弈状态。将资金面与情绪面共振进行分析，刺穿涨跌幅的表象。
-4. **策略建议**（70-100字）：基于资金流向、市场情绪和宏观基本面，给出冷血、理性的操作建议。
+3. **重点个股深度剖析**（200-350字）：必须将【内部量化系统研判】（代表真实的资金博弈，如主力洗盘、机构出逃）与附带的【情绪标签】（代表市场舆情和散户情绪）结合分析。重点寻找二者的“共振”（如情绪高涨且主力资金净流入，强化上涨逻辑）或“背离”（如情绪高涨但主力暗中出逃，提示诱多陷阱；情绪低迷但主力暗中吸筹，提示洗盘机会）。深度点评主散博弈状态，刺穿涨跌幅的表象，揭示背后的真实交易逻辑。
+4. **具体交易策略**（100-150字）：拒绝宏观套话（如“谨慎乐观”、“重个股轻指数”），必须**直接点名上述异动标的**给出具体的实操建议。明确指出哪些标的（结合资金与情绪数据）可顺势跟多，哪些标的（如主力暗中出逃）存在诱多风险需坚决规避或逢高做空，哪些建议观望。要求观点鲜明、一针见血。
 
 语言要求：专业、简洁、有美股特色，使用 Markdown 格式，字数350-450字。"""
-            system_prompt = "你是一位资深的股票量化分析师，擅长基于资金流向数据进行市场研判。"
-
             # Call LLM with retry
             if not self.us_client:
                 raise ValueError("US LLM client not initialized")
@@ -230,7 +219,6 @@ class LLMAnalyst:
                     stream = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
-                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
                         ],
                         max_tokens=4000,  # Increased max_tokens
@@ -281,7 +269,8 @@ class LLMAnalyst:
             )
                 
         except Exception as e:
-            logger.error(f"US Stock report generation failed: {e}")
+            import traceback
+            logger.error(f"US Stock report generation failed: {e}\n{traceback.format_exc()}")
             # Send fallback
             error_msg = f"AI 研报生成失败: {str(e)[:200]}"
             await DingTalkAlert.send_alert(
@@ -376,7 +365,7 @@ class LLMAnalyst:
 1. **市场综述**（80-100字）：基于涨跌分布判断市场整体情绪。
 2. **板块热点**（80-100字）：识别是否有机器人、物流、航天、能源、半导体等板块的集中异动。
 3. **重点个股与资金博弈**（200-350字）：结合系统提供的【内部量化系统研判】标签（如：主力洗盘、机构出逃），深度点评主力和散户的博弈状态，刺穿涨跌幅的表象。
-4. **策略建议**（70-100字）：基于资金流向和宏观基本面，给出冷血、理性的操作建议。
+4. **具体交易策略**（100-150字）：拒绝宏观套话（如“谨慎乐观”、“重个股轻指数”），必须**直接点名上述异动标的**给出具体的实操建议。明确指出哪些标的（结合资金数据）可顺势跟多，哪些标的（如机构出逃）存在诱多风险需坚决规避或逢高做空，哪些建议观望。要求观点鲜明、一针见血。
 
 语言要求：专业、简洁、有港股特色，使用 Markdown 格式，字数350-450字。"""
 
@@ -391,10 +380,9 @@ class LLMAnalyst:
                     stream = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
-                            {"role": "system", "content": self.hk_stock_system_prompt},
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=4500,
+                        max_tokens=4000,
                         temperature=0.7,
                         stream=True
                     )
@@ -439,7 +427,8 @@ class LLMAnalyst:
             logger.info(f"[Gemini/Futu] Report sent to Feishu successfully")
                 
         except Exception as e:
-            logger.error(f"[Gemini/Futu] Failed to generate HK report: {e}")
+            import traceback
+            logger.error(f"[Gemini/Futu] Failed to generate HK report: {e}\n{traceback.format_exc()}")
             # Send error notification
             error_title = f"[Gemini研报] 港股报告生成失败 ({current_time})"
             error_content = f"❌ **报告生成失败**\n\n错误信息：{str(e)[:200]}\n\n请检查：\n1. LLM_API_KEY (Gemini) 是否配置正确\n2. 富途API连接是否正常\n3. 网络连接状态"

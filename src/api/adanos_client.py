@@ -56,36 +56,47 @@ class AdanosClient:
         labels = []
         
         # 1. 热度解析 (Buzz Score)
-        buzz_score = data.get("buzz_score", 0)
-        if buzz_score >= 80:
-            labels.append("全网极度狂热")
-        elif buzz_score < 30:
-            labels.append("情绪冰点")
+        buzz_val = data.get("buzz_score")
+        buzz_score = float(buzz_val) if buzz_val is not None else 0.0
+        
+        if buzz_val is not None:
+            if buzz_score >= 80:
+                labels.append("全网极度狂热")
+            elif buzz_score < 30:
+                labels.append("情绪冰点")
             
         # 2. 多空解析 (Bullish/Bearish Percentage)
-        bullish = data.get("bullish_pct", 0)
-        bearish = data.get("bearish_pct", 0)
+        bullish_val = data.get("bullish_pct")
+        bullish = float(bullish_val) if bullish_val is not None else 0.0
         
-        if bullish > 60:
-            labels.append("散户强烈看多")
-        if bearish > 50:
-            labels.append("极度恐慌")
-            
-        divergence = abs(bullish - bearish)
-        if divergence < 10:
-            labels.append("多空极端分歧：方向选择中")
-        elif bullish > 2 * bearish:
-            labels.append("单边乐观：注意回调风险")
-        elif bearish > 2 * bullish:
-            labels.append("单边悲观：注意反弹机会")
+        bearish_val = data.get("bearish_pct")
+        bearish = float(bearish_val) if bearish_val is not None else 0.0
+        
+        if bullish_val is not None or bearish_val is not None:
+            if bullish > 60:
+                labels.append("散户强烈看多")
+            if bearish > 50:
+                labels.append("极度恐慌")
+                
+            divergence = abs(bullish - bearish)
+            if divergence < 10:
+                labels.append("多空极端分歧：方向选择中")
+            elif bullish > 2 * bearish:
+                labels.append("单边乐观：注意回调风险")
+            elif bearish > 2 * bullish:
+                labels.append("单边悲观：注意反弹机会")
             
         # 3. 边际解析 (Daily Trend)
-        daily_trend = data.get("daily_trend", [])
+        daily_trend = data.get("daily_trend") or []
         if len(daily_trend) >= 2:
             # Sort by date descending just in case
             sorted_trend = sorted(daily_trend, key=lambda x: x.get("date", ""), reverse=True)
-            latest_buzz = sorted_trend[0].get("buzz_score", 0)
-            prev_buzz = sorted_trend[1].get("buzz_score", 0)
+            
+            lb_val = sorted_trend[0].get("buzz_score")
+            latest_buzz = float(lb_val) if lb_val is not None else 0.0
+            
+            pb_val = sorted_trend[1].get("buzz_score")
+            prev_buzz = float(pb_val) if pb_val is not None else 0.0
             
             if prev_buzz > 0 and (latest_buzz - prev_buzz) / prev_buzz > 0.5:
                 labels.append("热度脉冲爆发")
