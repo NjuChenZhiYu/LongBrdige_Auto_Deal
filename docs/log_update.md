@@ -20,13 +20,13 @@ Python 的标准库 `logging.handlers` 提供了两种常用的日志滚动（Ro
 
 ### 3.1 核心参数设计
 *   `maxBytes`: `10 * 1024 * 1024` (10 MB)。每个日志文件达到 10MB 后自动进行切分。
-*   `backupCount`: `5`。系统最多保留 5 个旧的备份文件。
-*   **容量估算**：单个日志系列（例如 `monitor.log`）的最大磁盘占用量将被严格限制在 `10MB * (1 + 5) = 60MB` 左右。
+*   `backupCount`: `3`。系统最多保留 3 个旧的备份文件。
+*   **容量估算**：单个日志系列（例如 `monitor.log`）的最大磁盘占用量将被严格限制在 `10MB * (1 + 3) = 40MB` 左右。
 
 ### 3.2 归档机制表现
 当 `monitor.log` 达到 10MB 时：
-1. 原有的 `monitor.log.5`（如果存在）将被删除。
-2. 原有的 `monitor.log.4` 被重命名为 `monitor.log.5`。
+1. 原有的 `monitor.log.3`（如果存在）将被删除。
+2. 原有的 `monitor.log.2` 被重命名为 `monitor.log.3`。
 3. ...以此类推...
 4. 原有的 `monitor.log` 被重命名为 `monitor.log.1`。
 5. 系统创建一个新的空 `monitor.log` 继续写入。
