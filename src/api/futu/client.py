@@ -218,6 +218,38 @@ class FutuClient:
             logger.error(f"Error getting capital distribution for {symbol}: {e}")
             return None
 
+    def get_hk_historical_klines(self, code, num_days=60):
+        """
+        Get historical daily k-lines for EMA/Bias calculation.
+        """
+        from futu import KLType, AuType
+        from datetime import datetime, timedelta
+        
+        if not self._quote_ctx:
+            return None
+            
+        try:
+            start_date = (datetime.now() - timedelta(days=num_days + 30)).strftime('%Y-%m-%d') # Get extra days for EMA to warm up
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            
+            ret, data, page_req_key = self._quote_ctx.request_history_kline(
+                code, 
+                start=start_date, 
+                end=end_date, 
+                ktype=KLType.K_DAY, 
+                autype=AuType.QFQ, 
+                max_count=num_days + 30
+            )
+            
+            if ret == 0 and not data.empty:
+                return data
+            else:
+                logger.warning(f"Failed to get historical klines for {code}: {data}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting historical klines for {code}: {e}")
+            return None
+
     def analyze_capital_flow(self, capital_data, current_price_change):
         """
         Analyze capital flow to determine market state.

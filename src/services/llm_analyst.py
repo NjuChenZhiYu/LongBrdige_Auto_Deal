@@ -338,17 +338,33 @@ class LLMAnalyst:
                 except Exception as e:
                     logger.error(f"Failed to get capital flow for {code}: {e}")
                     flow_label, smart_net, retail_net = "分析不可用", 0, 0
+                    
+                # Fetch historical k-lines and calculate EMA derivatives
+                try:
+                    klines_df = await asyncio.to_thread(futu_client.get_hk_historical_klines, code, 60)
+                    if klines_df is not None and not klines_df.empty:
+                        from src.analysis.futu_math_indicator import calculate_ema_derivatives
+                        ema_data = calculate_ema_derivatives(klines_df)
+                        ema_tag = ema_data['tag']
+                        v5, a5, bias20 = ema_data['v5'], ema_data['a5'], ema_data['bias20']
+                        ema_text = f"   - 【量化技术面】：{ema_tag} (V5: {v5}%, A5: {a5}%, Bias20: {bias20}%)"
+                    else:
+                        ema_text = f"   - 【量化技术面】：数据缺失"
+                except Exception as e:
+                    logger.error(f"Failed to calculate EMA for {code}: {e}")
+                    ema_text = f"   - 【量化技术面】：计算错误"
                 
                 stock_details.append(
                     f"{i}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}\n"
                     f"   - 【内部量化系统研判】：{flow_label}\n"
-                    f"   - (资金支撑：主力净流 {smart_net}万, 散户净流 {retail_net}万)"
+                    f"   - (资金支撑：主力净流 {smart_net}万, 散户净流 {retail_net}万)\n"
+                    f"{ema_text}"
                 )
             
             stocks_text = "\n".join(stock_details)
             
             # Build prompt for Gemini
-            prompt = f"""你是一个顶级的量化分析师。以下是触发监控阈值的异动香港股票列表及【底层资金流向数据】：
+            prompt = f"""你是一个顶级的量化分析师。以下是触发监控阈值的异动香港股票列表及【底层资金流向数据】与【量化技术面数据】：
 
 【报告时间】{current_time}
 
@@ -364,8 +380,8 @@ class LLMAnalyst:
 请严格按照以下结构和字数要求，生成一份专业的市场快报：
 1. **市场综述**（80-100字）：基于涨跌分布判断市场整体情绪。
 2. **板块热点**（80-100字）：识别是否有机器人、物流、航天、能源、半导体等板块的集中异动。
-3. **重点个股与资金博弈**（200-350字）：结合系统提供的【内部量化系统研判】标签（如：主力洗盘、机构出逃），深度点评主力和散户的博弈状态，刺穿涨跌幅的表象。
-4. **具体交易策略**（100-150字）：拒绝宏观套话（如“谨慎乐观”、“重个股轻指数”），必须**直接点名上述异动标的**给出具体的实操建议。明确指出哪些标的（结合资金数据）可顺势跟多，哪些标的（如机构出逃）存在诱多风险需坚决规避或逢高做空，哪些建议观望。要求观点鲜明、一针见血。
+3. **重点个股深度剖析**（200-350字）：必须将【内部量化系统研判】（代表真实的资金博弈，如主力洗盘、机构出逃）与【量化技术面】（基于多周期EMA均线与乖离率的数学引擎结果，如V型反转预备、长短共振等）结合分析。深度点评主力和散户的博弈状态，刺穿涨跌幅的表象。若出现左侧极端信号（如极度超跌）或右侧共振信号，需重点提示其背后的均值回归或顺势加速逻辑。
+4. **具体交易策略**（100-150字）：拒绝宏观套话（如“谨慎乐观”、“重个股轻指数”），必须**直接点名上述异动标的**给出具体的实操建议。明确指出哪些标的（结合资金数据与技术面信号）可顺势跟多或左侧抄底，哪些标的（如机构出逃或估值透支）存在诱多风险需坚决规避或逢高做空，哪些建议观望。要求观点鲜明、一针见血。
 
 语言要求：专业、简洁、有港股特色，使用 Markdown 格式，字数350-450字。"""
 
