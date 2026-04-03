@@ -344,7 +344,7 @@ class LLMAnalyst:
                     klines_df = await asyncio.to_thread(futu_client.get_hk_historical_klines, code, 60)
                     if klines_df is not None and not klines_df.empty:
                         from src.analysis.futu_math_indicator import calculate_ema_derivatives
-                        ema_data = calculate_ema_derivatives(klines_df)
+                        ema_data = calculate_ema_derivatives(klines_df, price)
                         ema_tag = ema_data['tag']
                         v5, a5, bias20 = ema_data['v5'], ema_data['a5'], ema_data['bias20']
                         ema_text = f"   - 【量化技术面】：{ema_tag} (V5: {v5}%, A5: {a5}%, Bias20: {bias20}%)"
