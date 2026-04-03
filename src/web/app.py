@@ -145,8 +145,8 @@ def scheduled_log_cleanup():
     logger.info("Running scheduled log cleanup...")
     try:
         from src.utils.log_cleaner import clean_futu_logs
-        # Keep logs for the last 5 days
-        clean_futu_logs(days_to_keep=5)
+        # Keep logs for the last 3 days to prevent disk space issues
+        clean_futu_logs(days_to_keep=3)
     except Exception as e:
         logger.error(f"Scheduled log cleanup failed: {e}")
 
