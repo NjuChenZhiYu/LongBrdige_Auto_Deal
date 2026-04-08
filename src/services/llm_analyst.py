@@ -15,6 +15,8 @@ from src.api.adanos_client import adanos_client
 logger = logging.getLogger(__name__)
 
 class LLMAnalyst:
+    MAX_WATCH_STOCKS = 10  # 限制分析的最大股票数量
+    
     def __init__(self):
         # US/LongPort Client (Gemini)
         self.us_api_key = Settings.LLM_API_KEY
@@ -301,30 +303,61 @@ class LLMAnalyst:
             threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
         
         try:
-            logger.info(f"[Gemini/Futu] Generating HK report for stocks exceeding {threshold}% threshold...")
+            logger.info(f"[Gemini/Futu] Generating HK report for stocks exceeding {threshold}% threshold and special symbols...")
             
-            # Fetch threshold stocks from Futu
+            # 1. Fetch threshold stocks from Futu
             threshold_stocks = await asyncio.to_thread(futu_client.get_threshold_quotes, threshold)
             
-            if not threshold_stocks:
-                logger.info(f"[Gemini/Futu] No HK stocks exceeded {threshold}% threshold")
+            # 2. Process special symbols
+            special_symbols = config.get('special_sysmbol', [])
+            special_stocks = []
+            if special_symbols:
+                # Extract "HK.06682" from "HK.06682 范式智能"
+                special_stock_codes = [s.split(' ')[0] for s in special_symbols]
+                special_stocks = await asyncio.to_thread(futu_client.get_special_quotes, special_stock_codes)
+            
+            # 3. Merge and deduplicate
+            merged_stocks = []
+            seen_codes = set()
+            
+            # First, add all special stocks
+            for stock in special_stocks:
+                code = stock.get('code', stock.get('symbol'))
+                if code and code not in seen_codes:
+                    merged_stocks.append(stock)
+                    seen_codes.add(code)
+            
+            # Sort threshold_stocks by absolute change rate descending
+            threshold_stocks.sort(key=lambda x: abs(x['change_rate']), reverse=True)
+            
+            # Add threshold stocks until we reach MAX_WATCH_STOCKS
+            for stock in threshold_stocks:
+                if len(merged_stocks) >= self.MAX_WATCH_STOCKS:
+                    break
+                code = stock.get('code', stock.get('symbol'))
+                if code and code not in seen_codes:
+                    merged_stocks.append(stock)
+                    seen_codes.add(code)
+            
+            if not merged_stocks:
+                logger.info(f"[Gemini/Futu] No HK stocks exceeded {threshold}% threshold and no special symbols found")
                 title = f"[Gemini研报] 港股市场观察 ({current_time})"
-                content = f"📊 **港股市场观察**\n\n当前富途自选股中无标的涨跌幅超过 **{threshold}%** 阈值，暂无显著异动。\n\n> 监控时间：{current_time}"
+                content = f"📊 **港股市场观察**\n\n当前富途自选股中无标的涨跌幅超过 **{threshold}%** 阈值，且无特殊关注标的异动。\n\n> 监控时间：{current_time}"
                 await FeishuAlert.send_alert(title, content)
                 return
             
-            # Sort by absolute change rate
-            threshold_stocks.sort(key=lambda x: abs(x['change_rate']), reverse=True)
+            # Update threshold_stocks to be our merged and limited list for downstream processing
+            threshold_stocks = merged_stocks
             
-            # Calculate stats
+            # Calculate stats (using the selected stocks)
             up_count = sum(1 for s in threshold_stocks if s['change_rate'] > 0)
             down_count = len(threshold_stocks) - up_count
-            avg_change = sum(s['change_rate'] for s in threshold_stocks) / len(threshold_stocks)
+            avg_change = sum(s['change_rate'] for s in threshold_stocks) / len(threshold_stocks) if threshold_stocks else 0
             
             # Build stock details with names
             stock_details = []
             
-            for i, stock in enumerate(threshold_stocks[:15], 1):
+            for i, stock in enumerate(threshold_stocks, 1):
                 symbol = stock.get('symbol', stock.get('code', 'Unknown'))
                 code = stock.get('code')
                 price = stock['last_price']
@@ -393,13 +426,14 @@ class LLMAnalyst:
             report_content = ""
             for attempt in range(3):
                 try:
+                    logger.info(f"[Gemini/Futu] Attempt {attempt+1} to generate HK report...")
                     stream = await self.us_client.chat.completions.create(
                         model=self.us_model,
                         messages=[
                             {"role": "user", "content": prompt}
                         ],
                         max_tokens=4000,
-                        temperature=0.7,
+                        temperature=1.0, # Increased temperature to avoid repetitive generation loop
                         stream=True
                     )
                     
@@ -409,16 +443,20 @@ class LLMAnalyst:
                         if content:
                             full_content += content
                             
-                    report_content = full_content
-                    if report_content and len(report_content) > 100:
+                    # Validate content ending and length
+                    content = full_content.strip()
+                    valid_endings = ('.', '。', '!', '！', '?', '？', ']', '】', '）', '*')
+                    if content and len(content) > 150 and content.endswith(valid_endings):
+                        report_content = content
+                        logger.info(f"[Gemini/Futu] Attempt {attempt+1} successful.")
                         break
                     
-                    logger.warning(f"[Gemini/Futu] Attempt {attempt+1}: Empty or short content ({len(report_content) if report_content else 0} chars), retrying...")
-                    await asyncio.sleep(1)
+                    logger.warning(f"[Gemini/Futu] Attempt {attempt+1}: Invalid content received (length: {len(content)}, ends with: '{content[-5:]}'). Retrying...")
+                    await asyncio.sleep(2 * (attempt + 1))
                 except Exception as e:
                     logger.error(f"[Gemini/Futu] Attempt {attempt+1} failed: {e}")
                     if attempt < 2:
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(3 * (attempt + 1))
             
             if not report_content:
                 raise ValueError("Failed to generate report after 3 attempts")

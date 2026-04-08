@@ -199,6 +199,50 @@ class FutuClient:
             logger.error(f"Error fetching Futu threshold quotes: {e}")
             return []
 
+    def get_special_quotes(self, special_stock_codes: list) -> list:
+        """
+        Get real-time quotes for special symbols directly.
+        This method is synchronous (blocking) because Futu API is blocking.
+        Callers should use asyncio.to_thread if calling from an async loop.
+        
+        Args:
+            special_stock_codes (list): List of special stock codes (e.g., ["HK.06682"]).
+            
+        Returns:
+            list: List of dicts with stock data [{'symbol':..., 'last_price':..., 'change_rate':...}]
+        """
+        if not special_stock_codes:
+            return []
+            
+        try:
+            ctx = self.get_quote_context()
+            ret, data = ctx.get_market_snapshot(special_stock_codes)
+            if ret == 0 and data is not None and not data.empty:
+                quotes = []
+                for _, row in data.iterrows():
+                    last_price = float(row['last_price'])
+                    prev_close = float(row['prev_close_price'])
+                    if prev_close > 0:
+                        change_rate = ((last_price - prev_close) / prev_close) * 100
+                        symbol = row['code']
+                        name = row.get('name', '')
+                        display_symbol = f"{symbol} {name}" if name and name != symbol else symbol
+                        quotes.append({
+                            'symbol': display_symbol,
+                            'code': symbol,
+                            'name': name,
+                            'last_price': last_price,
+                            'change_rate': change_rate,
+                            'prev_close': prev_close
+                        })
+                return quotes
+            else:
+                logger.warning(f"Failed to get special quotes snapshot: {data}")
+            return []
+        except Exception as e:
+            logger.error(f"Error fetching special quotes: {e}")
+            return []
+
     def get_capital_flow(self, symbol):
         """
         Get capital flow distribution for a stock.
