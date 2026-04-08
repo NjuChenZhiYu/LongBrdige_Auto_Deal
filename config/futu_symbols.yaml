@@ -40,5 +40,12 @@ symbols:
 - HK.02252 微创机器人-B
 - HK.02598 连连数字
 - HK.02618 京东物流
+special sysmbol:
+- HK.06682 范式智能
+- HK.02432 越疆
+- HK.02050 三花智控
+- HK.01816 中广核电力
+- HK.02598 连连数字
+- HK.02590 极智嘉-W
 thresholds:
   price_change: 5.0
