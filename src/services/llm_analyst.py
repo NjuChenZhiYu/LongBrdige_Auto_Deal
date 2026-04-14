@@ -22,13 +22,13 @@ class LLMAnalyst:
         self.us_api_key = Settings.LLM_API_KEY
         self.us_base_url = Settings.LLM_BASE_URL
         self.us_model = Settings.LLM_MODEL
-        self.us_client = AsyncOpenAI(api_key=self.us_api_key, base_url=self.us_base_url) if self.us_api_key else None
+        self.us_client = AsyncOpenAI(api_key=self.us_api_key, base_url=self.us_base_url, timeout=60.0) if self.us_api_key else None
 
         # HK/Futu Client (Kimi)
         self.hk_api_key = Settings.KIMI_API_KEY
         self.hk_base_url = Settings.KIMI_LLM_BASE_URL
         self.hk_model = Settings.KIMI_LLM_MODEL
-        self.hk_client = AsyncOpenAI(api_key=self.hk_api_key, base_url=self.hk_base_url) if self.hk_api_key else None
+        self.hk_client = AsyncOpenAI(api_key=self.hk_api_key, base_url=self.hk_base_url, timeout=60.0) if self.hk_api_key else None
         
         # Options report prompt (merged)
         self.options_prompt_template = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
@@ -160,29 +160,38 @@ class LLMAnalyst:
             # Build stock details with names
             stock_details = []
             
-            for i, stock in enumerate(threshold_stocks[:15], 1):
+            async def fetch_us_stock_data(stock, index):
                 symbol = stock.get('symbol', 'Unknown')
                 price = stock['last_price']
                 change = stock['change_rate']
                 direction = "📈" if change > 0 else "📉"
                 
-                # Fetch sentiment labels from Adanos API
-                sentiment_labels = await adanos_client.get_sentiment_labels(symbol)
+                # Fetch sentiment and capital flow concurrently
+                sentiment_task = asyncio.create_task(adanos_client.get_sentiment_labels(symbol))
+                capital_task = asyncio.create_task(longport_client.get_capital_flow(symbol))
+                
+                try:
+                    sentiment_labels, capital_data = await asyncio.gather(sentiment_task, capital_task)
+                except Exception as e:
+                    logger.error(f"Failed to get US data concurrently for {symbol}: {e}")
+                    sentiment_labels, capital_data = [], None
+                
                 sentiment_text = f" [{', '.join(sentiment_labels)}]" if sentiment_labels else ""
                 
-                # Fetch capital flow data from LongPort
                 try:
-                    capital_data = await longport_client.get_capital_flow(symbol)
                     flow_label, smart_net, retail_net = longport_client.analyze_us_capital_flow(capital_data, change)
                 except Exception as e:
-                    logger.error(f"Failed to get US capital flow for {symbol}: {e}")
+                    logger.error(f"Failed to analyze US capital flow for {symbol}: {e}")
                     flow_label, smart_net, retail_net = "分析不可用", 0, 0
                 
-                stock_details.append(
-                    f"{i}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}{sentiment_text}\n"
+                return (
+                    f"{index}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}{sentiment_text}\n"
                     f"   - 【内部量化系统研判】：{flow_label}\n"
                     f"   - (资金支撑：主力净流 {smart_net}万, 散户净流 {retail_net}万)"
                 )
+
+            tasks = [fetch_us_stock_data(stock, i) for i, stock in enumerate(threshold_stocks[:15], 1)]
+            stock_details = await asyncio.gather(*tasks)
             
             stocks_text = "\n".join(stock_details)
             
@@ -212,8 +221,8 @@ class LLMAnalyst:
                 raise ValueError("US LLM client not initialized")
             
             report_content = None
-            # Define valid completion endings
-            valid_endings = ('.', '。', '!', '！', '?', '？', ']', '】', '）')
+            # Define valid completion endings (expanded for markdown)
+            valid_endings = ('.', '。', '!', '！', '?', '？', ']', '】', '）', '*', '`', '"', "'", '>', '~')
             
             for attempt in range(3):  # Retry 3 times
                 try:
@@ -236,7 +245,7 @@ class LLMAnalyst:
                     
                     # Validate content
                     content = full_content.strip()
-                    if content and len(content) > 150 and content.endswith(valid_endings):
+                    if content and len(content) > 150 and (content.endswith(valid_endings) or content[-1].isalnum()):
                         report_content = content
                         logger.info(f"Attempt {attempt+1} successful.")
                         break
@@ -305,16 +314,14 @@ class LLMAnalyst:
         try:
             logger.info(f"[Gemini/Futu] Generating HK report for stocks exceeding {threshold}% threshold and special symbols...")
             
-            # 1. Fetch threshold stocks from Futu
-            threshold_stocks = await asyncio.to_thread(futu_client.get_threshold_quotes, threshold)
+            # 1 & 2. Fetch threshold stocks and special stocks concurrently
+            special_symbols = config.get('special_symbols', [])
+            special_stock_codes = [s.split(' ')[0] for s in special_symbols] if special_symbols else []
             
-            # 2. Process special symbols
-            special_symbols = config.get('special_sysmbol', [])
-            special_stocks = []
-            if special_symbols:
-                # Extract "HK.06682" from "HK.06682 范式智能"
-                special_stock_codes = [s.split(' ')[0] for s in special_symbols]
-                special_stocks = await asyncio.to_thread(futu_client.get_special_quotes, special_stock_codes)
+            threshold_task = asyncio.to_thread(futu_client.get_threshold_quotes, threshold)
+            special_task = asyncio.to_thread(futu_client.get_special_quotes, special_stock_codes)
+            
+            threshold_stocks, special_stocks = await asyncio.gather(threshold_task, special_task)
             
             # 3. Merge and deduplicate
             merged_stocks = []
@@ -357,24 +364,33 @@ class LLMAnalyst:
             # Build stock details with names
             stock_details = []
             
-            for i, stock in enumerate(threshold_stocks, 1):
+            # Helper function to fetch data for a single stock concurrently
+            async def fetch_stock_data(stock, index):
                 symbol = stock.get('symbol', stock.get('code', 'Unknown'))
                 code = stock.get('code')
                 price = stock['last_price']
                 change = stock['change_rate']
                 direction = "📈" if change > 0 else "📉"
                 
-                # Fetch capital flow data
+                # Fetch capital flow and klines concurrently for this stock
+                capital_task = asyncio.to_thread(futu_client.get_capital_flow, code)
+                klines_task = asyncio.to_thread(futu_client.get_hk_historical_klines, code, 60)
+                
                 try:
-                    capital_data = await asyncio.to_thread(futu_client.get_capital_flow, code)
+                    capital_data, klines_df = await asyncio.gather(capital_task, klines_task)
+                except Exception as e:
+                    logger.error(f"Failed to get data concurrently for {code}: {e}")
+                    capital_data, klines_df = None, None
+
+                # Process capital flow
+                try:
                     flow_label, smart_net, retail_net = futu_client.analyze_capital_flow(capital_data, change)
                 except Exception as e:
-                    logger.error(f"Failed to get capital flow for {code}: {e}")
+                    logger.error(f"Failed to analyze capital flow for {code}: {e}")
                     flow_label, smart_net, retail_net = "分析不可用", 0, 0
                     
-                # Fetch historical k-lines and calculate EMA derivatives
+                # Process EMA derivatives
                 try:
-                    klines_df = await asyncio.to_thread(futu_client.get_hk_historical_klines, code, 60)
                     if klines_df is not None and not klines_df.empty:
                         from src.analysis.futu_math_indicator import calculate_ema_derivatives
                         ema_data = calculate_ema_derivatives(klines_df, price)
@@ -387,12 +403,16 @@ class LLMAnalyst:
                     logger.error(f"Failed to calculate EMA for {code}: {e}")
                     ema_text = f"   - 【量化技术面】：计算错误"
                 
-                stock_details.append(
-                    f"{i}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}\n"
+                return (
+                    f"{index}. {symbol} 现价${price:.2f} ({change:+.2f}%) {direction}\n"
                     f"   - 【内部量化系统研判】：{flow_label}\n"
                     f"   - (资金支撑：主力净流 {smart_net}万, 散户净流 {retail_net}万)\n"
                     f"{ema_text}"
                 )
+
+            # Run all stock data fetching tasks concurrently
+            tasks = [fetch_stock_data(stock, i) for i, stock in enumerate(threshold_stocks, 1)]
+            stock_details = await asyncio.gather(*tasks)
             
             stocks_text = "\n".join(stock_details)
             
@@ -424,6 +444,7 @@ class LLMAnalyst:
             
             # Call Gemini API with streaming
             report_content = ""
+            last_error = None
             for attempt in range(3):
                 try:
                     logger.info(f"[Gemini/Futu] Attempt {attempt+1} to generate HK report...")
@@ -434,7 +455,8 @@ class LLMAnalyst:
                         ],
                         max_tokens=4000,
                         temperature=1.0, # Increased temperature to avoid repetitive generation loop
-                        stream=True
+                        stream=True,
+                        timeout=90.0
                     )
                     
                     full_content = ""
@@ -445,8 +467,8 @@ class LLMAnalyst:
                             
                     # Validate content ending and length
                     content = full_content.strip()
-                    valid_endings = ('.', '。', '!', '！', '?', '？', ']', '】', '）', '*')
-                    if content and len(content) > 150 and content.endswith(valid_endings):
+                    valid_endings = ('.', '。', '!', '！', '?', '？', ']', '】', '）', '*', '`', '"', "'", '>', '~')
+                    if content and len(content) > 150 and (content.endswith(valid_endings) or content[-1].isalnum()):
                         report_content = content
                         logger.info(f"[Gemini/Futu] Attempt {attempt+1} successful.")
                         break
@@ -454,12 +476,16 @@ class LLMAnalyst:
                     logger.warning(f"[Gemini/Futu] Attempt {attempt+1}: Invalid content received (length: {len(content)}, ends with: '{content[-5:]}'). Retrying...")
                     await asyncio.sleep(2 * (attempt + 1))
                 except Exception as e:
+                    last_error = e
                     logger.error(f"[Gemini/Futu] Attempt {attempt+1} failed: {e}")
                     if attempt < 2:
                         await asyncio.sleep(3 * (attempt + 1))
             
             if not report_content:
-                raise ValueError("Failed to generate report after 3 attempts")
+                error_msg = f"Failed to generate report after 3 attempts."
+                if last_error:
+                    error_msg += f" Last specific error: {str(last_error)}"
+                raise ValueError(error_msg)
             
             logger.info(f"[Gemini/Futu] HK report generated successfully with {len(threshold_stocks)} stocks")
             
@@ -485,7 +511,7 @@ class LLMAnalyst:
             logger.error(f"[Gemini/Futu] Failed to generate HK report: {e}\n{traceback.format_exc()}")
             # Send error notification
             error_title = f"[Gemini研报] 港股报告生成失败 ({current_time})"
-            error_content = f"❌ **报告生成失败**\n\n错误信息：{str(e)[:200]}\n\n请检查：\n1. LLM_API_KEY (Gemini) 是否配置正确\n2. 富途API连接是否正常\n3. 网络连接状态"
+            error_content = f"❌ **报告生成失败**\n\n**具体错误原因**：\n{str(e)}\n\n(请根据上述具体报错排查，如为超时请检查网络代理，如为认证失败请检查 API Key 权限)"
             await FeishuAlert.send_alert(error_title, error_content)
 
     async def generate_report(self):
