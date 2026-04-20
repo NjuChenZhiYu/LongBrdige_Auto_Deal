@@ -453,7 +453,7 @@ class LLMAnalyst:
                         messages=[
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=4000,
+                        max_tokens=5000,
                         temperature=1.0, # Increased temperature to avoid repetitive generation loop
                         stream=True,
                         timeout=90.0
