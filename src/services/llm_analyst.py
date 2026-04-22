@@ -1,7 +1,10 @@
 """LLM Analyst service for generating daily market reports."""
 import logging
 import asyncio
-from typing import Optional, Dict, List
+import re
+from typing import Optional, Dict, List, Any
+import numpy as np
+import pandas as pd
 from openai import AsyncOpenAI
 from config.settings import Settings
 from src.services.signal_recorder import signal_recorder
@@ -42,6 +45,185 @@ class LLMAnalyst:
 
 今日期权异动数据:
 {signal_text}"""
+
+    def _build_single_stock_prompt(
+        self,
+        symbol: str,
+        current_time: str,
+        short_memory: Dict[str, Any],
+        mid_trend: Dict[str, Any]
+    ) -> str:
+        """Build final LLM prompt from structured short/mid features."""
+        today = short_memory.get("today", {}) or {}
+        summary_10d = short_memory.get("summary_10d", {}) or {}
+        return f"""你是港股量化深度分析师。请基于下面结构化数据生成单股研报。
+    【报告时间】
+    {current_time}
+
+    【标的】
+    {symbol}
+
+    【短期记忆（近10日）】
+    - window_used: {short_memory.get('window_used')}
+    - short_window_incomplete: {short_memory.get('short_window_incomplete')}
+    - 资金流标签: {short_memory.get('flow_label')}
+    - 主力净流(万): {short_memory.get('smart_net_wan')}
+    - 散户净流(万): {short_memory.get('retail_net_wan')}
+    - 最新技术标签: {short_memory.get('latest_tech_tag')}
+    - 当日快照:
+      - date: {today.get('date')}
+      - ohlc: {today.get('open')}/{today.get('high')}/{today.get('low')}/{today.get('close')}
+      - change_rate: {today.get('change_rate')}%
+      - bias20: {today.get('bias20')}%
+      - tag_today: {today.get('tag_today')}
+    - 10日压缩画像:
+      - max_cum_up_10d_pct: {summary_10d.get('max_cum_up_10d_pct')}%
+      - max_cum_drop_10d_pct: {summary_10d.get('max_cum_drop_10d_pct')}%
+      - max_drawdown_10d_pct: {summary_10d.get('max_drawdown_10d_pct')}%
+      - shape_10d_tag: {summary_10d.get('shape_10d_tag')}
+      - short_window_price_distribute: {summary_10d.get('short_window_price_distribute')}
+      - poc_range_10d: {summary_10d.get('poc_range_10d')}
+      - poc_ratio_10d_pct: {summary_10d.get('poc_ratio_10d_pct')}%
+
+    【中期趋势（近90日）】
+    - mode: {mid_trend.get('mode')}
+    - window_used: {mid_trend.get('window_used')}
+    - summary: {mid_trend.get('summary')}
+    - shape: {mid_trend.get('shape')}
+    - position_pct: {mid_trend.get('position_pct')}
+    - peaks: {mid_trend.get('peaks')}
+    - troughs: {mid_trend.get('troughs')}
+    - poc_range: {mid_trend.get('poc_range')}
+    - poc_ratio_pct: {mid_trend.get('poc_ratio_pct')}
+    - price_proxy: {mid_trend.get('price_proxy')}
+    - macd_cross_count: {mid_trend.get('macd_cross_count')}
+    - volatility_state: {mid_trend.get('volatility_state')}
+
+    请按以下结构输出（Markdown）：
+    1. 核心结论（先给方向，40-80字）
+    2. 证据链（短期当日信号 + 10日风险收益 + 10日筹码分布 + 中期形态，180-260字）
+    3. 3-5个交易日情景推演（上涨/震荡/回撤触发条件，120-180字）
+    4. 交易计划（入场条件、止损位、失效条件，80-120字）
+    5. 风险清单（3条以内，简洁）
+
+    要求：
+    - 结论必须可交易，禁止空泛表述。
+    - 若样本不足（short_window_incomplete=true 或 mode!=FULL_90），必须显式提示不确定性。"""
+
+    async def _call_llm_with_retry(self, prompt: str, max_tokens: int = 4000, temperature: float = 0.9) -> Optional[str]:
+        """Call LLM with streaming and retry validation (simplified)."""
+        if not self.us_client:
+            raise ValueError("US LLM client (Gemini) not initialized")
+
+        for attempt in range(3):
+            try:
+                stream = await self.us_client.chat.completions.create(
+                    model=self.us_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=True,
+                    timeout=90.0
+                )
+                
+                full_content = ""
+                async for chunk in stream:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        full_content += content
+                
+                report_content = full_content.strip()
+                if report_content and len(report_content) > 120:
+                    return report_content
+                    
+                logger.warning(f"[Gemini/SingleStock] Attempt {attempt+1}: Empty or short content, retrying...")
+                await asyncio.sleep(2 * (attempt + 1))
+            except Exception as e:
+                logger.error(f"[Gemini/SingleStock] Attempt {attempt + 1} failed: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(3 * (attempt + 1))
+                    
+        return None
+
+    async def generate_single_stock_futu_report(
+        self,
+        symbol_input: str,
+        trigger_type: str = "MANUAL",
+        lookback_days_short: int = 10,
+        lookback_days_mid: int = 90
+    ) -> Dict[str, Any]:
+        """Generate single-stock deep analysis report for HK symbols."""
+        from src.api.futu.client import futu_client
+
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        try:
+            standard_symbol = futu_client.parse_symbol_input(symbol_input)
+            if not standard_symbol:
+                msg = "未匹配到有效港股代码（支持 HK.XXXXX / 纯数字 / 配置内中文简称）"
+                return {"ok": False, "symbol": symbol_input, "title": None, "report": None, "error": msg}
+
+            logger.info(
+                f"[Gemini/SingleStock] start report symbol_input={symbol_input}, parsed={standard_symbol}, trigger={trigger_type}"
+            )
+
+            # 串行收集数据，确保前置数据就绪后再进入后续分析，避免并发时空数据继续流入分析链路。
+            snapshot_list = await asyncio.to_thread(futu_client.get_special_quotes, [standard_symbol])
+
+            if not snapshot_list:
+                msg = "未获取到股票快照数据，请确认代码或行情权限。"
+                return {"ok": False, "symbol": standard_symbol, "title": None, "report": None, "error": msg}
+
+            stock = snapshot_list[0]
+            price = float(stock.get("last_price", 0.0))
+            capital_data = await asyncio.to_thread(futu_client.get_capital_flow, standard_symbol)
+            klines_df = await asyncio.to_thread(
+                futu_client.get_hk_historical_klines,
+                standard_symbol,
+                max(lookback_days_mid + 30, 120),
+            )
+            if klines_df is None or klines_df.empty:
+                msg = f"未获取到 {standard_symbol} 历史K线数据，无法生成短中期分析。"
+                logger.warning(f"[Gemini/SingleStock] {msg}")
+                return {"ok": False, "symbol": standard_symbol, "title": None, "report": None, "error": msg}
+
+            from src.analysis.futu_math_indicator import build_short_term_memory, build_mid_term_trend
+            short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
+            mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
+            prompt = self._build_single_stock_prompt(standard_symbol, current_time, short_memory, mid_trend)
+
+            report_content = await self._call_llm_with_retry(prompt)
+            if not report_content:
+                raise ValueError("LLM生成报告失败（3次重试后仍不满足完整性校验）")
+
+            full_report = f"""🦞 **Gemini 单股深度研报** | {standard_symbol} | {current_time}
+
+---
+
+{report_content}
+
+---
+
+📊 **数据窗口**：短期{lookback_days_short}天 | 中期{lookback_days_mid}天
+🔔 **触发类型**：{trigger_type}
+🧠 **AI模型**：{self.us_model}"""
+
+            title = f"[单股深度研报] {standard_symbol} ({current_time})"
+            await FeishuAlert.send_alert(title, full_report)
+            logger.info(f"[Gemini/SingleStock] report sent successfully: {standard_symbol}")
+
+            return {
+                "ok": True,
+                "symbol": standard_symbol,
+                "title": title,
+                "report": full_report,
+                "error": None
+            }
+        except Exception as e:
+            logger.error(f"[Gemini/SingleStock] failed for {symbol_input}: {e}", exc_info=True)
+            error_title = f"[单股研报错误] {symbol_input} ({current_time})"
+            error_content = f"❌ 分析失败：{str(e)}"
+            await FeishuAlert.send_alert(error_title, error_content)
+            return {"ok": False, "symbol": symbol_input, "title": None, "report": None, "error": str(e)}
 
     async def generate_options_report(self):
         """

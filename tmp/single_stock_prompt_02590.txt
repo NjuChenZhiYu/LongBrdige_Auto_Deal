@@ -1,0 +1,53 @@
+你是港股量化深度分析师。请基于下面结构化数据生成单股研报。
+    【报告时间】
+    2026-04-22 15:31
+
+    【标的】
+    HK.02590
+
+    【短期记忆（近10日）】
+    - window_used: 10
+    - short_window_incomplete: False
+    - 资金流标签: 【散户诱多 / 诱多出货】
+    - 主力净流(万): -145.47
+    - 散户净流(万): 296.57
+    - 最新技术标签: 【主升浪降速：高位震荡/诱多】
+    - 当日快照:
+      - date: 2026-04-22 15:31:47(RT)
+      - ohlc: 19.02/19.25/18.5/19.14
+      - change_rate: 0.0%
+      - bias20: 2.2%
+      - tag_today: 【主升浪降速：高位震荡/诱多】
+    - 10日压缩画像:
+      - max_cum_up_10d_pct: -4.45%
+      - max_cum_drop_10d_pct: -4.45%
+      - max_drawdown_10d_pct: 10.09%
+      - shape_10d_tag: 高波动上行推进
+      - short_window_price_distribute: [{'bucket_range': '18.63-19.03', 'volume_ratio_pct': 67.64}, {'bucket_range': '18.23-18.63', 'volume_ratio_pct': 21.54}, {'bucket_range': '19.03-19.43', 'volume_ratio_pct': 10.82}]
+      - poc_range_10d: 18.63-19.03
+      - poc_ratio_10d_pct: 67.64%
+
+    【中期趋势（近90日）】
+    - mode: FULL_90
+    - window_used: 90
+    - summary: 近90日形态为混合震荡结构，已融合实时价格，当前位于90日空间13.86%，POC区间18.5-20.16（占比22.88%），短期动量标签【主升浪加速：长短共振】。
+    - shape: 混合震荡结构
+    - position_pct: 13.86
+    - peaks: [20.14, 18.6, 19.14]
+    - troughs: [16.9, 18.23, 18.36]
+    - poc_range: [18.5, 20.16]
+    - poc_ratio_pct: 22.88
+    - price_proxy: hlc3
+    - macd_cross_count: 3
+    - volatility_state: 高波动
+
+    请按以下结构输出（Markdown）：
+    1. 核心结论（先给方向，40-80字）
+    2. 证据链（短期当日信号 + 10日风险收益 + 10日筹码分布 + 中期形态，180-260字）
+    3. 3-5个交易日情景推演（上涨/震荡/回撤触发条件，120-180字）
+    4. 交易计划（入场条件、止损位、失效条件，80-120字）
+    5. 风险清单（3条以内，简洁）
+
+    要求：
+    - 结论必须可交易，禁止空泛表述。
+    - 若样本不足（short_window_incomplete=true 或 mode!=FULL_90），必须显式提示不确定性。
