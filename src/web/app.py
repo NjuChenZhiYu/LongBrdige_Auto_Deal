@@ -335,6 +335,36 @@ async def trigger_hk_report():
         logger.error(f"Error triggering HK report: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/reports/trigger/hk/single-stock', methods=['POST'])
+async def trigger_hk_single_stock_report():
+    """Generate single-stock HK report by symbol from frontend."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        symbol = (payload.get('symbol') or request.form.get('symbol') or '').strip()
+        if not symbol:
+            return jsonify({'status': 'error', 'message': 'symbol 不能为空'}), 400
+
+        result = await llm_analyst.generate_single_stock_futu_report(
+            symbol_input=symbol,
+            trigger_type='MANUAL',
+        )
+        if result.get('ok'):
+            return jsonify({
+                'status': 'success',
+                'message': f"单股研报生成成功: {result.get('symbol')}",
+                'symbol': result.get('symbol'),
+                'title': result.get('title'),
+                'report': result.get('report'),
+            }), 200
+        return jsonify({
+            'status': 'error',
+            'message': result.get('error') or '单股研报生成失败',
+            'symbol': result.get('symbol'),
+        }), 500
+    except Exception as e:
+        logger.error(f"Error triggering HK single-stock report: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 from src.api.futu.client import futu_client
 from src.monitor.hk_watchlist_monitor import HKWatchlistMonitor
 

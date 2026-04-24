@@ -15,6 +15,32 @@ class FutuClient:
             cls._instance = super(FutuClient, cls).__new__(cls)
         return cls._instance
 
+    def parse_symbol_input(self, symbol_input: str) -> str:
+        """Normalize user symbol input to standard HK code (e.g., HK.02598) with fuzzy name matching."""
+        import re
+        if not symbol_input:
+            return None
+
+        raw = str(symbol_input).strip()
+        if not raw:
+            return None
+
+        # 1. 精确匹配代码格式: 02590, 2590, HK.02590, 02590.HK
+        match = re.match(r'^(?:HK\.)?(\d{1,5})(?:\.HK)?$', raw.upper())
+        if match:
+            return f"HK.{match.group(1).zfill(5)}"
+
+        # 2. 模糊匹配名称 (如 "阿里巴巴" 匹配 "HK.09988 阿里巴巴-W")
+        config = getattr(Settings, "FUTU_SYMBOLS_CONFIG", {}) or {}
+        for key in ("special_symbols", "symbols"):
+            for item in config.get(key, []) or []:
+                if isinstance(item, str) and raw in item:
+                    code_match = re.match(r'^HK\.\d{5}', item.strip())
+                    if code_match:
+                        return code_match.group(0)
+
+        return None
+
     def get_quote_context(self, host=None, port=None):
         """Get or create OpenQuoteContext singleton"""
         if host is None:
@@ -248,7 +274,11 @@ class FutuClient:
         Get capital flow distribution for a stock.
         """
         if not self._quote_ctx:
-            return None
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for capital flow {symbol}: {e}")
+                return None
             
         try:
             # get_capital_distribution returns (ret, data)
@@ -270,7 +300,11 @@ class FutuClient:
         from datetime import datetime, timedelta
         
         if not self._quote_ctx:
-            return None
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for historical klines {code}: {e}")
+                return None
             
         try:
             start_date = (datetime.now() - timedelta(days=num_days + 30)).strftime('%Y-%m-%d') # Get extra days for EMA to warm up

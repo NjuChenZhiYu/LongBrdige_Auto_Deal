@@ -2,6 +2,38 @@
 
 {% block title %}港股市场 - 量化交易监控中心{% endblock %}
 
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+    .report-panel {
+        margin-top: 12px;
+        border: 1px solid #e6e6e6;
+        border-radius: 8px;
+        background: #fafafa;
+        padding: 12px;
+        display: none;
+    }
+    .report-panel h3 {
+        margin: 0 0 10px 0;
+        color: #333;
+        font-size: 16px;
+    }
+    .markdown-body {
+        line-height: 1.6;
+        color: #222;
+    }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+        margin-top: 12px;
+    }
+    .markdown-body pre {
+        background: #f0f0f0;
+        padding: 10px;
+        overflow-x: auto;
+        border-radius: 6px;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="grid-container">
     <div class="card">
@@ -28,6 +60,21 @@
             <p>基于当前港股行情，生成 AI 分析报告。</p>
             <button type="submit" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">生成港股研报</button>
         </form>
+        <hr>
+        <h2>🧠 单股深度研报</h2>
+        <form id="single-stock-form" onsubmit="return triggerSingleStockReport(this)">
+            <div class="form-group">
+                <label for="single_stock_symbol">港股代码</label>
+                <input id="single_stock_symbol" name="symbol" type="text" placeholder="如 02590 或 HK.02590" required>
+                <div class="hint">支持纯数字代码和 HK.XXXXX 格式。</div>
+            </div>
+            <button id="single-stock-submit" type="submit" style="background: linear-gradient(135deg, #1d976c 0%, #93f9b9 100%); color: #073b2b;">生成单股研报</button>
+        </form>
+        <div id="single-stock-status" class="hint" style="margin-top: 10px;"></div>
+        <div id="single-stock-report-panel" class="report-panel">
+            <h3>单股研报结果</h3>
+            <div id="single-stock-report" class="markdown-body"></div>
+        </div>
         <hr>
         <h2>同步自选股</h2>
         <form action="/sync_futu_watchlist" method="POST">
@@ -176,6 +223,54 @@
             alert(result.message || '操作完成');
         } catch (e) {
             alert('请求失败');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = originalText;
+        }
+        return false;
+    }
+
+    async function triggerSingleStockReport(form) {
+        event.preventDefault();
+        const input = document.getElementById('single_stock_symbol');
+        const statusEl = document.getElementById('single-stock-status');
+        const reportEl = document.getElementById('single-stock-report');
+        const reportPanelEl = document.getElementById('single-stock-report-panel');
+        const btn = document.getElementById('single-stock-submit');
+        const symbol = (input.value || '').trim();
+
+        if (!symbol) {
+            statusEl.textContent = '请输入港股代码';
+            statusEl.style.color = 'red';
+            return false;
+        }
+
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = '生成中...';
+        statusEl.textContent = `正在生成 ${symbol} 的单股研报，请稍候...`;
+        statusEl.style.color = '#666';
+        reportPanelEl.style.display = 'none';
+        reportEl.innerHTML = '';
+
+        try {
+            const response = await fetch('/api/reports/trigger/hk/single-stock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol })
+            });
+            const result = await response.json();
+            if (!response.ok || result.status !== 'success') {
+                throw new Error(result.message || '请求失败');
+            }
+
+            statusEl.textContent = result.message || '单股研报生成成功';
+            statusEl.style.color = '#1f7a1f';
+            reportEl.innerHTML = marked.parse(result.report || '');
+            reportPanelEl.style.display = 'block';
+        } catch (e) {
+            statusEl.textContent = `生成失败: ${e.message || e}`;
+            statusEl.style.color = 'red';
         } finally {
             btn.disabled = false;
             btn.innerText = originalText;
