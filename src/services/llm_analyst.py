@@ -175,6 +175,8 @@ class LLMAnalyst:
 
             stock = snapshot_list[0]
             price = float(stock.get("last_price", 0.0))
+            stock_name = str(stock.get("name", "") or "").strip()
+            symbol_for_prompt = f"{standard_symbol} {stock_name}" if stock_name else standard_symbol
             capital_data = await asyncio.to_thread(futu_client.get_capital_flow, standard_symbol)
             klines_df = await asyncio.to_thread(
                 futu_client.get_hk_historical_klines,
@@ -189,7 +191,7 @@ class LLMAnalyst:
             from src.analysis.futu_math_indicator import build_short_term_memory, build_mid_term_trend
             short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
             mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
-            prompt = self._build_single_stock_prompt(standard_symbol, current_time, short_memory, mid_trend)
+            prompt = self._build_single_stock_prompt(symbol_for_prompt, current_time, short_memory, mid_trend)
 
             report_content = await self._call_llm_with_retry(prompt)
             if not report_content:
