@@ -295,9 +295,11 @@ def build_current_day_indicator(
     )
     intraday_den = preclose if preclose > 0 else max(_safe_float(today_row.get("close"), 0.0), 1e-6)
     intraday_range_pct = (_safe_float(today_row.get("high")) - _safe_float(today_row.get("low"))) / intraday_den * 100.0
+    rt_price = _safe_float(stock_snapshot.get("last_price"), _safe_float(today_row.get("close"), 0.0))
 
     return {
         "date": str(today_row.get(date_col, "")),
+        "rt_price": round(rt_price, 3),
         "open": round(_safe_float(today_row.get("open")), 3),
         "high": round(_safe_float(today_row.get("high")), 3),
         "low": round(_safe_float(today_row.get("low")), 3),
@@ -497,6 +499,7 @@ def build_short_window_indicator(
 def _empty_short_term_payload(lookback_days_short: int, flow_label: str, smart_net: float, retail_net: float) -> Dict[str, Any]:
     today = {
         "date": "",
+        "rt_price": 0.0,
         "open": 0.0,
         "high": 0.0,
         "low": 0.0,
@@ -520,6 +523,8 @@ def _empty_short_term_payload(lookback_days_short: int, flow_label: str, smart_n
         "window_target": lookback_days_short,
         "window_used": 0,
         "short_window_incomplete": True,
+        "current_price": 0.0,
+        "price_source": "NO_DATA_FALLBACK",
         "flow_label": flow_label,
         "smart_net_wan": smart_net,
         "retail_net_wan": retail_net,
@@ -571,6 +576,8 @@ def _prepare_short_term_dataset(
 
     d_current = d.copy()
     latest_row = d_current.iloc[-1].copy()
+    # 强制将实时价格作为“当前时刻”样本追加到序列末端，
+    # 保证 short 侧指标不再停留在前一交易日收盘口径。
     latest_row["open"] = _safe_float(latest_row.get("open"), _safe_float(latest_row.get("close"), current_price))
     latest_row["close"] = current_price
     latest_row["high"] = max(_safe_float(latest_row.get("high"), current_price), current_price)
@@ -672,6 +679,8 @@ def build_short_term_memory(
         "window_target": lookback_days_short,
         "window_used": int(len(last_n)),
         "short_window_incomplete": len(last_n) < lookback_days_short,
+        "current_price": round(float(current_price), 3),
+        "price_source": "REALTIME_LAST_PRICE_APPEND",
         "flow_label": flow_label,
         "smart_net_wan": smart_net,
         "retail_net_wan": retail_net,
@@ -680,6 +689,57 @@ def build_short_term_memory(
         "summary_10d": summary_10d,
         "recent_days": {"today": today, "summary_10d": summary_10d},
     }
+
+def hk_basic_finance_data(stock_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    根据 Futu API 的快照提取基本面估值与财务数据。
+    """
+    if not stock_snapshot:
+        stock_snapshot = {}
+
+    def _is_missing(raw: Any) -> bool:
+        if raw is None:
+            return True
+        try:
+            return bool(pd.isna(raw))
+        except Exception:
+            return False
+
+    def _fmt_amount(val: float, raw: Any) -> str:
+        if _is_missing(raw):
+            return "无数据"
+        if abs(val) > 1_0000_0000:
+            return f"{round(val / 1_0000_0000.0, 2)}亿"
+        return f"{round(val / 1_0000.0, 2)}万"
+
+    def _fmt_ratio(val: float, raw: Any) -> str:
+        if _is_missing(raw):
+            return "无数据"
+        return f"{round(val, 2)}"
+
+    total_market_val_raw = stock_snapshot.get("total_market_val")
+    circular_market_val_raw = stock_snapshot.get("circular_market_val")
+    net_profit_raw = stock_snapshot.get("net_profit")
+    pe_ratio_raw = stock_snapshot.get("pe_ratio")
+    pe_ttm_ratio_raw = stock_snapshot.get("pe_ttm_ratio")
+    pb_ratio_raw = stock_snapshot.get("pb_ratio")
+
+    total_market_val = _safe_float(total_market_val_raw, 0.0)
+    circular_market_val = _safe_float(circular_market_val_raw, 0.0)
+    net_profit = _safe_float(net_profit_raw, 0.0)
+    pe_ratio = _safe_float(pe_ratio_raw, 0.0)
+    pe_ttm_ratio = _safe_float(pe_ttm_ratio_raw, 0.0)
+    pb_ratio = _safe_float(pb_ratio_raw, 0.0)
+
+    return {
+        "total_market_val": _fmt_amount(total_market_val, total_market_val_raw),
+        "circular_market_val": _fmt_amount(circular_market_val, circular_market_val_raw),
+        "net_profit": _fmt_amount(net_profit, net_profit_raw),
+        "pe_ratio": _fmt_ratio(pe_ratio, pe_ratio_raw),
+        "pe_ttm_ratio": _fmt_ratio(pe_ttm_ratio, pe_ttm_ratio_raw),
+        "pb_ratio": _fmt_ratio(pb_ratio, pb_ratio_raw),
+    }
+
 
 def build_mid_term_trend(
     klines_df: Optional[pd.DataFrame],
@@ -778,6 +838,7 @@ def build_mid_term_trend(
         "mode": mode,
         "window_target": lookback_days_mid,
         "window_used": int(base_used),
+        "price_source": "REALTIME_LAST_PRICE_APPEND",
         "summary": summary,
         "shape": mid_features.get("shape", "数据不足"),
         "position_pct": mid_features.get("position_pct", 0.0),

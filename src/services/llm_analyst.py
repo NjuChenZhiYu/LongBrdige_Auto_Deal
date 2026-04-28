@@ -50,6 +50,7 @@ class LLMAnalyst:
         self,
         symbol: str,
         current_time: str,
+        fundamental_data: Dict[str, Any],
         short_memory: Dict[str, Any],
         mid_trend: Dict[str, Any]
     ) -> str:
@@ -63,54 +64,62 @@ class LLMAnalyst:
     【标的】
     {symbol}
 
+    【基本面与估值快照】
+    - 所属板块：{fundamental_data.get('plate_info', '无数据')}
+    - 总市值：{fundamental_data.get('total_market_val', '无数据')}
+    - 流通市值：{fundamental_data.get('circular_market_val', '无数据')}
+    - 净利润：{fundamental_data.get('net_profit', '无数据')}
+    - PE(静)：{fundamental_data.get('pe_ratio', '无数据')}
+    - PE(TTM)：{fundamental_data.get('pe_ttm_ratio', '无数据')}
+    - PB：{fundamental_data.get('pb_ratio', '无数据')}
+
     【短期记忆（近10日）】
-    - window_used: {short_memory.get('window_used')}
-    - short_window_incomplete: {short_memory.get('short_window_incomplete')}
+    - window_used (实际可用天数): {short_memory.get('window_used')}
+    - short_window_incomplete (是否不足10日): {short_memory.get('short_window_incomplete')}
     - 资金流标签: {short_memory.get('flow_label')}
     - 主力净流(万): {short_memory.get('smart_net_wan')}
     - 散户净流(万): {short_memory.get('retail_net_wan')}
-    - 最新技术标签: {short_memory.get('latest_tech_tag')}
     - 当日快照:
-      - date: {today.get('date')}
-      - ohlc: {today.get('open')}/{today.get('high')}/{today.get('low')}/{today.get('close')}
-      - change_rate: {today.get('change_rate')}%
-      - bias20: {today.get('bias20')}%
-      - tag_today: {today.get('tag_today')}
+      - date (日期): {today.get('date')}
+      - rt_price (此刻价格): {today.get('rt_price')}
+      - ohlc (开/高/低/收): {today.get('open')}/{today.get('high')}/{today.get('low')}/{today.get('close')}
+      - change_rate (涨跌幅): {today.get('change_rate')}%
+      - bias20 (乖离率): {today.get('bias20')}%
+      - tag_today (当日结构信号): {today.get('tag_today')}
     - 10日压缩画像:
-      - max_cum_up_10d_pct: {summary_10d.get('max_cum_up_10d_pct')}%
-      - max_cum_drop_10d_pct: {summary_10d.get('max_cum_drop_10d_pct')}%
-      - max_drawdown_10d_pct: {summary_10d.get('max_drawdown_10d_pct')}%
-      - shape_10d_tag: {summary_10d.get('shape_10d_tag')}
-      - short_window_price_distribute: {summary_10d.get('short_window_price_distribute')}
-      - poc_range_10d: {summary_10d.get('poc_range_10d')}
-      - poc_ratio_10d_pct: {summary_10d.get('poc_ratio_10d_pct')}%
+      - max_cum_up_10d_pct (10日累计最大涨幅): {summary_10d.get('max_cum_up_10d_pct')}%
+      - max_cum_drop_10d_pct (10日累计最大跌幅): {summary_10d.get('max_cum_drop_10d_pct')}%
+      - max_drawdown_10d_pct (10日最大回撤): {summary_10d.get('max_drawdown_10d_pct')}%
+      - shape_10d_tag (10日形态特征): {summary_10d.get('shape_10d_tag')}
+      - short_window_price_distribute (筹码集中区前三名): {summary_10d.get('short_window_price_distribute')}
+      - poc_range_10d (主峰价格区间): {summary_10d.get('poc_range_10d')}
+      - poc_ratio_10d_pct (主峰成交量占比): {summary_10d.get('poc_ratio_10d_pct')}%
 
     【中期趋势（近90日）】
-    - mode: {mid_trend.get('mode')}
-    - window_used: {mid_trend.get('window_used')}
-    - summary: {mid_trend.get('summary')}
-    - shape: {mid_trend.get('shape')}
-    - position_pct: {mid_trend.get('position_pct')}
-    - peaks: {mid_trend.get('peaks')}
-    - troughs: {mid_trend.get('troughs')}
-    - poc_range: {mid_trend.get('poc_range')}
-    - poc_ratio_pct: {mid_trend.get('poc_ratio_pct')}
-    - price_proxy: {mid_trend.get('price_proxy')}
-    - macd_cross_count: {mid_trend.get('macd_cross_count')}
-    - volatility_state: {mid_trend.get('volatility_state')}
+    - mode (数据完整度): {mid_trend.get('mode')}
+    - window_used (实际可用天数): {mid_trend.get('window_used')}
+    - summary (规则引擎总结): {mid_trend.get('summary')}
+    - shape (中期形态结构): {mid_trend.get('shape')}
+    - position_pct (当前价格处于90日高低点的百分位): {mid_trend.get('position_pct')}
+    - peaks (近期波峰序列): {mid_trend.get('peaks')}
+    - troughs (近期波谷序列): {mid_trend.get('troughs')}
+    - poc_range (90日主筹码峰区间): {mid_trend.get('poc_range')}
+    - poc_ratio_pct (90日主筹码峰占比): {mid_trend.get('poc_ratio_pct')}
+    - price_proxy (筹码映射基准价格): {mid_trend.get('price_proxy')}
+    - macd_cross_count (零轴上方金叉次数): {mid_trend.get('macd_cross_count')}
+    - volatility_state (波动率状态): {mid_trend.get('volatility_state')}
 
     请按以下结构输出（Markdown）：
     1. 核心结论（先给方向，40-80字）
-    2. 证据链（短期当日信号 + 10日风险收益 + 10日筹码分布 + 中期形态，180-260字）
-    3. 3-5个交易日情景推演（上涨/震荡/回撤触发条件，120-180字）
+    2. 基本面与中长期推演（结合估值数据与内置知识分析业务质地、景气度与安全边际，150-200字）
+    3. 技术面证据链（短期当日信号 + 10日风险收益 + 10日筹码分布 + 中期形态，180-260字）
     4. 交易计划（入场条件、止损位、失效条件，80-120字）
-    5. 风险清单（3条以内，简洁）
 
     要求：
     - 结论必须可交易，禁止空泛表述。
     - 若样本不足（short_window_incomplete=true 或 mode!=FULL_90），必须显式提示不确定性。"""
 
-    async def _call_llm_with_retry(self, prompt: str, max_tokens: int = 4000, temperature: float = 0.9) -> Optional[str]:
+    async def _call_llm_with_retry(self, prompt: str, max_tokens: int = 4500, temperature: float = 0.9) -> Optional[str]:
         """Call LLM with streaming and retry validation (simplified)."""
         if not self.us_client:
             raise ValueError("US LLM client (Gemini) not initialized")
@@ -178,6 +187,29 @@ class LLMAnalyst:
             stock_name = str(stock.get("name", "") or "").strip()
             symbol_for_prompt = f"{standard_symbol} {stock_name}" if stock_name else standard_symbol
             capital_data = await asyncio.to_thread(futu_client.get_capital_flow, standard_symbol)
+            
+            # Fetch plate info and full snapshot for fundamental fields.
+            full_snapshot = {}
+            try:
+                quote_ctx = futu_client.get_quote_context()
+                ret_plate, plate_data = await asyncio.to_thread(quote_ctx.get_owner_plate, [standard_symbol])
+                plate_info = "无数据"
+                if ret_plate == 0 and plate_data is not None and not plate_data.empty:
+                    # Filter for INDUSTRY or CONCEPT plates
+                    valid_plates = plate_data[plate_data['plate_type'].isin(['INDUSTRY', 'CONCEPT'])]
+                    if not valid_plates.empty:
+                        plate_names = valid_plates['plate_name'].tolist()
+                        plate_info = "、".join(plate_names)
+
+                # get_special_quotes returns a trimmed quote payload.
+                # Pull full market snapshot to enrich fundamentals (PE/PB/net_profit/market cap).
+                ret_snap, snap_df = await asyncio.to_thread(quote_ctx.get_market_snapshot, [standard_symbol])
+                if ret_snap == 0 and snap_df is not None and not snap_df.empty:
+                    full_snapshot = snap_df.iloc[0].to_dict()
+            except Exception as e:
+                logger.warning(f"[Gemini/SingleStock] Failed to fetch plate info for {standard_symbol}: {e}")
+                plate_info = "获取失败"
+                
             klines_df = await asyncio.to_thread(
                 futu_client.get_hk_historical_klines,
                 standard_symbol,
@@ -188,10 +220,13 @@ class LLMAnalyst:
                 logger.warning(f"[Gemini/SingleStock] {msg}")
                 return {"ok": False, "symbol": standard_symbol, "title": None, "report": None, "error": msg}
 
-            from src.analysis.futu_math_indicator import build_short_term_memory, build_mid_term_trend
+            from src.analysis.futu_math_indicator import build_short_term_memory, build_mid_term_trend, hk_basic_finance_data
             short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
             mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
-            prompt = self._build_single_stock_prompt(symbol_for_prompt, current_time, short_memory, mid_trend)
+            finance_snapshot = {**stock, **full_snapshot}
+            fundamental_data = hk_basic_finance_data(finance_snapshot)
+            fundamental_data['plate_info'] = plate_info
+            prompt = self._build_single_stock_prompt(symbol_for_prompt, current_time, fundamental_data, short_memory, mid_trend)
 
             report_content = await self._call_llm_with_retry(prompt)
             if not report_content:

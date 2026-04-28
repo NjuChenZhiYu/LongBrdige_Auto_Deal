@@ -328,6 +328,26 @@ class FutuClient:
             logger.error(f"Error getting historical klines for {code}: {e}")
             return None
 
+    def get_stock_basicinfo(self, market: str, security_type: str, code_list=None):
+        """
+        Get basic stock info including some financial fields.
+        """
+        try:
+            from futu import Market, SecurityType
+            market_map = {"HK": Market.HK, "US": Market.US, "SH": Market.SH, "SZ": Market.SZ}
+            sec_type_map = {"SECURITY": SecurityType.STOCK}
+            
+            mkt = market_map.get(market.upper(), Market.HK)
+            sec_t = sec_type_map.get(security_type.upper(), SecurityType.STOCK)
+            
+            ret, data = self._quote_ctx.get_stock_basicinfo(mkt, sec_t, code_list)
+            if ret == 0:
+                return data
+            logger.error(f"[Futu] Failed to get stock basic info: {data}")
+        except Exception as e:
+            logger.error(f"[Futu] Exception getting stock basic info: {e}")
+        return None
+
     def analyze_capital_flow(self, capital_data, current_price_change):
         """
         Analyze capital flow to determine market state.
