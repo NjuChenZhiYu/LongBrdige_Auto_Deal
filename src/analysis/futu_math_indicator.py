@@ -468,9 +468,11 @@ def _build_short_window_price_distribute(
     }
 
 def build_short_window_indicator(
-    last_n: pd.DataFrame
+    last_n: pd.DataFrame,
+    window_target: int = 10,
 ) -> Dict[str, Any]:
     """Build simplified 10-day summary: up/down risk + shape tag only."""
+    window_used = int(len(last_n))
 
     high_series = pd.to_numeric(last_n.get("high", last_n["close"]), errors="coerce").fillna(last_n["close"])
     low_series = pd.to_numeric(last_n.get("low", last_n["close"]), errors="coerce").fillna(last_n["close"])
@@ -487,6 +489,9 @@ def build_short_window_indicator(
     chip_dist = _build_short_window_price_distribute(last_n, bucket_count=5, top_k=3)
 
     return {
+        "window_target": int(window_target),
+        "window_used": window_used,
+        "short_window_incomplete": window_used < window_target,
         "max_cum_up_10d_pct": round(max_cum_up_10d_pct, 2),
         "max_cum_drop_10d_pct": round(max_cum_drop_10d_pct, 2),
         "max_drawdown_10d_pct": round(max_drawdown_10d_pct, 2),
@@ -673,12 +678,14 @@ def build_short_term_memory(
     )
     summary_10d = build_short_window_indicator(
         last_n=last_n,
+        window_target=lookback_days_short,
     )
 
     return {
-        "window_target": lookback_days_short,
-        "window_used": int(len(last_n)),
-        "short_window_incomplete": len(last_n) < lookback_days_short,
+        # Keep top-level compatibility for prompt consumers, but source from summary_10d only.
+        "window_target": summary_10d["window_target"],
+        "window_used": summary_10d["window_used"],
+        "short_window_incomplete": summary_10d["short_window_incomplete"],
         "current_price": round(float(current_price), 3),
         "price_source": "REALTIME_LAST_PRICE_APPEND",
         "flow_label": flow_label,
