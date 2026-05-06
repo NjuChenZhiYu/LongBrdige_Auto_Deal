@@ -17,6 +17,9 @@ nohup.out
 data/
 *.json
 !config/*.json
+tmp/single_stock_prompt_*.txt
+tmp/single_stock_prompt_*_meta.json
+tmp/stock_promt_storage/
 
 # Python
 __pycache__/

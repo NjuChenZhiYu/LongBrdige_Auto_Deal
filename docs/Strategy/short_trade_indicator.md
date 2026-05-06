@@ -95,39 +95,47 @@ $$
 
 ## 4. 输出结构（给服务层）
 
-建议输出两段：
-
-1. 当日快照（用于“现在发生了什么”）
-2. 10 日压缩画像（用于“最近怎么演化到这里”）
+按当前 Prompt 实际展示口径（参考 `single_stock_prompt_0428_02590.txt`），短期结构应为：
 
 ```json
 {
+  "window_used": 10,
+  "short_window_incomplete": false,
+  "flow_label": "资金博弈不明",
+  "smart_net_wan": -72.28,
+  "retail_net_wan": -70.92,
   "today": {
-    "date": "2026-04-21",
-    "open": 12.30,
-    "high": 12.88,
-    "low": 12.05,
-    "close": 12.76,
-    "change_rate": 2.31,
-    "bias20": 1.82,
-    "volume_ratio": 0.18,
-    "tag_today": "今日转多",
-    "intraday_range_pct": 6.72
+    "date": "2026-04-27 18:16:47(RT)",
+    "rt_price": 18.3,
+    "open": 18.15,
+    "high": 18.5,
+    "low": 17.96,
+    "close": 18.3,
+    "change_rate": 0.0,
+    "bias20": -1.35,
+    "volume_ratio": 0.0,
+    "tag_today": "【跌势放缓：左侧建仓观察区】",
+    "intraday_range_pct": 2.95
   },
   "summary_10d": {
-    "max_cum_up_10d_pct": 7.32,
-    "max_drawdown_10d_pct": 5.68,
-    "shape_10d_tag": "窄幅压缩后上沿试探",
+    "max_cum_up_10d_pct": 3.64,
+    "max_cum_drop_10d_pct": -4.94,
+    "max_drawdown_10d_pct": 10.3,
+    "shape_10d_tag": "高波动下行探底",
     "short_window_price_distribute": [
-      {"bucket_range": "20.00-25.00", "volume_ratio_pct": 30.0},
-      {"bucket_range": "25.00-30.00", "volume_ratio_pct": 25.0},
-      {"bucket_range": "15.00-20.00", "volume_ratio_pct": 18.0}
+      {"bucket_range": "18.72-19.12", "volume_ratio_pct": 46.83},
+      {"bucket_range": "17.91-18.31", "volume_ratio_pct": 31.49},
+      {"bucket_range": "18.31-18.72", "volume_ratio_pct": 21.68}
     ],
-    "poc_range_10d": "20.00-25.00",
-    "poc_ratio_10d_pct": 30.0
+    "poc_range_10d": "18.72-19.12",
+    "poc_ratio_10d_pct": 46.83
   }
 }
 ```
+
+说明：
+1. 第 4 节以“服务层对 Prompt 的直接供给字段”为准，仅保留 Prompt 当前消费到的短期字段。
+2. 若后续 Prompt 新增字段（如 `window_target/current_price/price_source`），再同步更新此结构。
 
 ---
 

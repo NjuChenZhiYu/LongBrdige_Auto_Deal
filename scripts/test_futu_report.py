@@ -27,14 +27,11 @@ async def test_futu_report():
     print("\n--- Current Configuration ---")
     print("Config keys:", config.keys())
     
-    # Let's check all possible typo variations in the config
-    print("special sysmbol:", config.get('special sysmbol', []))
-    print("special_sysmbol:", config.get('special_sysmbol', []))
     print("special_symbols:", config.get('special_symbols', []))
     
     # 2. Test special quotes fetching
     print("\n--- Testing Data Fetching ---")
-    special_symbols = config.get('special_symbols', config.get('special_sysmbol', config.get('special sysmbol', [])))
+    special_symbols = config.get('special_symbols', [])
     if special_symbols:
         special_stock_codes = [s.split(' ')[0] for s in special_symbols]
         print(f"Extracted codes for special stocks: {special_stock_codes}")
@@ -56,8 +53,6 @@ async def test_futu_report():
     print("\n--- Testing generate_futu_hk_report() ---")
     print("Calling generate_futu_hk_report with threshold=0.0...")
     
-    # Since we found the typo in llm_analyst.py, we know it will miss the special symbols if we don't fix it.
-    # The user asked to see if it can get special_symbols and market data.
     try:
         # Warning: This might send a Feishu alert if configured!
         # For a pure test, we might just want to check the data extraction parts.

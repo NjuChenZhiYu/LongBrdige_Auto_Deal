@@ -112,7 +112,7 @@ POST /api/v1/reports/futu/single-stock
 
 针对单个 symbol 按“先快照、后补全”的顺序拉取与校验：
 
-1. 实时快照：价格、涨跌幅、昨收（可复用 `get_special_quotes([symbol])` 方式）。
+1. 实时与财务快照：价格、涨跌幅、昨收，以及基础估值（总市值、流通市值、PE、PE-TTM、PB、净利润）等（复用 `get_market_snapshot([symbol])` 方式）。
 2. 历史 K 线：`get_hk_historical_klines(symbol, num_days)`，若为空则直接失败返回，不进入后续分析。
 3. 资金流：`get_capital_flow(symbol)`（允许为空并降级）。
 4. 历史 K 线窗口建议：
@@ -132,6 +132,22 @@ def _build_semantic_memory(klines_df, snapshot, capital_data) -> dict:
 ```
 
 输出两层记忆（当前启用）：
+
+### 实时价格拼接口径（Short / Mid 统一）
+
+为避免指标停留在“前一交易日收盘价”，短期与中期都采用同一口径：
+
+1. **Short (`build_short_term_memory`)**  
+   - 历史基底：`get_hk_historical_klines`。  
+   - 实时价来源：`snapshot.last_price`（无值时退化为最近收盘）。  
+   - 处理方式：将实时价作为一条“RT 行”追加到序列末端，再计算 EMA/MACD/Bias 与 10 日统计。
+
+2. **Mid (`build_mid_term_trend`)**  
+   - 历史基底：`get_hk_historical_klines`。  
+   - 实时价来源：服务层传入 `current_price`（来自实时快照）。  
+   - 处理方式：同样将实时价作为末端样本追加后，再计算形态位置、POC、波动率、MACD 交叉。
+
+结论：**Short 与 Mid 均以“当前价格”作为 Pandas 序列最后一个数据点，而不是前一交易日收盘价。**
 
 ### A) 短期记忆（近 10 个交易日）
 
@@ -168,6 +184,16 @@ def _build_semantic_memory(klines_df, snapshot, capital_data) -> dict:
 
 当前版本先关闭锚点记忆，避免过早引入长周期噪声。后续如需恢复，可启用 `MA250/年内高低点/成交密集区`。
 
+### D) 基本面与估值特征（实时快照）
+
+基于富途 `get_market_snapshot` 提取基本财务指标，并基于 `get_owner_plate` 提取板块归属：
+- **所属板块**：行业板块 (`INDUSTRY`)、概念板块 (`CONCEPT`) 等。
+- **盈利数据**：净利润 (`net_profit`)
+- **估值水平**：市盈率 (`pe_ratio`)、市盈率 TTM (`pe_ttm_ratio`)、市净率 (`pb_ratio`)
+- **规模体量**：总市值 (`total_market_val`)、流通市值 (`circular_market_val`)
+
+*注：将这些数值格式化为文本（如“所属板块: 互联网/人工智能, 总市值: 4.39万亿, PE(TTM): 17.6”），作为 LLM 进行基本面质地、行业景气度及安全边际中长期推演的核心依据。*
+
 ## 4.3 样本不足补偿机制（必须实现）
 
 为避免新股或次新股因为历史数据不足导致分析不可用，需引入分层补偿：
@@ -197,23 +223,30 @@ def _build_semantic_memory(klines_df, snapshot, capital_data) -> dict:
 
 1. 角色设定：港股量化深度分析师。
 2. 输入数据声明：以下数据来自 Futu，已做语义清洗。
-3. 三段记忆数据块：
+3. 核心数据块：
+  - `【基本面与估值快照】`
   - `【短期记忆】`
   - `【中期趋势】`
 4. 分析任务：
+  - 基本面与中长期推演：结合估值数据与内置知识，分析公司质地、产业景气度及安全边际。
   - 趋势判断（短中长一致性）。
   - 主力/散户博弈识别。
   - 当前所处交易阶段（启动、加速、派发、探底等）。
-  - 未来 3-5 个交易日情景推演（上涨/震荡/回撤条件）。
   - 明确交易建议（触发条件、失效条件、风控位）。
+  - 极端场景风控滤网：必须给出 1 条“非结构化证伪条件”（非价格/均线/止损触发），用于防止线性外推。
 5. 输出格式约束：Markdown，分节、字数范围、禁止空话。
 
-短期块字段与口径统一参考 `docs/short_trade_indicator.md`，此处不再重复定义。
+短期块字段与口径统一参考 `docs/short_trade_indicator.md`。
 
 ## 5.2 Prompt 示例骨架
 
 ```text
 你是港股量化深度分析师。请基于下述“结构化历史记忆档案”分析单一标的：{symbol}
+
+【基本面与估值快照】
+所属板块：{plate_info}
+总市值：{total_market_val}，流通市值：{circular_market_val}，净利润：{net_profit}
+PE(静)：{pe_ratio}，PE(TTM)：{pe_ttm_ratio}，PB：{pb_ratio}
 
 【实时快照】
 ...
@@ -226,10 +259,16 @@ def _build_semantic_memory(klines_df, snapshot, capital_data) -> dict:
 
 请输出：
 1) 核心结论（先给方向）
-2) 证据链（资金 + 技术 + 结构）
-3) 交易计划（入场条件/止损位/止盈位）
-4) 风险清单（失效场景）
+2) 基本面与中长期推演（结合估值数据分析业务质地、景气度与安全边际）
+3) 技术面证据链（资金 + 技术 + 结构）
+4) 交易计划（入场条件/止损位/失效条件）
+5) 核心风险/证伪条件（除常规止损外，给出 1 条可导致逻辑瞬间崩塌的非结构化风险触发）
 ```
+
+证伪条件示例（择一）：
+1. 海外关键市场突发加征关税，导致核心产品毛利与出海节奏被快速压缩。
+2. 核心耗材/服务被集采或行政限价，盈利模型在短期内失真。
+3. 核心算法能力被开源平替或竞品降维打击，估值溢价逻辑失效。
 
 ---
 
