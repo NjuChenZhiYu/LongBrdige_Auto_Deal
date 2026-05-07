@@ -3,8 +3,19 @@ import logging
 import pandas as pd
 from futu import OpenQuoteContext, SysConfig
 from config.settings import Settings
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return default
+        return float(value)
+    except Exception:
+        return default
 
 class FutuClient:
     _instance = None
@@ -291,6 +302,141 @@ class FutuClient:
         except Exception as e:
             logger.error(f"Error getting capital distribution for {symbol}: {e}")
             return None
+
+    def get_capital_flow_history(
+        self,
+        symbol: str,
+        period_type=None,
+        window_days: int = 90,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Get historical capital flow (day-level by default) for rolling windows.
+        """
+        if not self._quote_ctx:
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for capital flow history {symbol}: {e}")
+                return None
+
+        try:
+            from futu import PeriodType
+
+            if period_type is None:
+                period_type = PeriodType.DAY
+
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=max(window_days, 30) + 30)).strftime("%Y-%m-%d")
+            ret, data = self._quote_ctx.get_capital_flow(
+                symbol,
+                period_type=period_type,
+                start=start_date,
+                end=end_date,
+            )
+            if ret == 0 and data is not None and not data.empty:
+                return data
+            logger.warning(f"Failed to get capital flow history for {symbol}: {data}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting capital flow history for {symbol}: {e}")
+            return None
+
+    def get_stock_filter_metrics(
+        self,
+        symbol: str,
+        plate_code: Optional[str] = None,
+        max_pages: int = 10,
+        page_size: int = 200,
+    ) -> Dict[str, Any]:
+        """
+        Module A/C helper: query PS_TTM + growth metrics and sector PS median via get_stock_filter.
+        """
+        if not self._quote_ctx:
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for stock filter metrics {symbol}: {e}")
+                return {}
+
+        try:
+            from futu import Market, FinancialFilter, StockField, FinancialQuarter
+
+            def _first_attr(obj, names: List[str]):
+                for n in names:
+                    if hasattr(obj, n):
+                        return getattr(obj, n)
+                return None
+
+            ps_field = _first_attr(StockField, ["PS_TTM"])
+            rev_growth_field = _first_attr(StockField, ["SUM_OF_BUSINESS_GROWTH"])
+            nocf_growth_field = _first_attr(StockField, ["NOCF_PER_SHARE_GROWTH_RATE", "NOCF_GROWTH_RATE"])
+            quarter = _first_attr(FinancialQuarter, ["MOST_RECENT_QUARTER", "ANNUAL"])
+
+            def _build_filter(field):
+                if field is None:
+                    return None
+                f = FinancialFilter()
+                f.stock_field = field
+                f.is_no_filter = True
+                if quarter is not None:
+                    f.quarter = quarter
+                return f
+
+            ps_filter = _build_filter(ps_field)
+            rev_filter = _build_filter(rev_growth_field)
+            nocf_filter = _build_filter(nocf_growth_field)
+            filter_list = [f for f in (ps_filter, rev_filter, nocf_filter) if f is not None]
+            if not filter_list:
+                return {}
+
+            begin = 0
+            last_page = False
+            page_count = 0
+            target_metrics: Dict[str, Any] = {}
+            sector_ps_values: List[float] = []
+            symbol_upper = (symbol or "").upper()
+
+            while (not last_page) and page_count < max_pages:
+                ret, payload = self._quote_ctx.get_stock_filter(
+                    market=Market.HK,
+                    filter_list=filter_list,
+                    plate_code=plate_code,
+                    begin=begin,
+                    num=page_size,
+                )
+                if ret != 0:
+                    logger.warning(f"get_stock_filter failed for {symbol}: {payload}")
+                    break
+
+                last_page, all_count, stock_list = payload
+                if not stock_list:
+                    break
+
+                for item in stock_list:
+                    try:
+                        code = str(getattr(item, "stock_code", "")).upper()
+                        ps_val = _safe_float(item[ps_filter], default=float("nan")) if ps_filter else float("nan")
+                        if pd.notna(ps_val) and ps_val > 0:
+                            sector_ps_values.append(ps_val)
+                        if code == symbol_upper:
+                            if ps_filter is not None:
+                                target_metrics["ps_ttm"] = _safe_float(item[ps_filter], default=0.0)
+                            if rev_filter is not None:
+                                target_metrics["sum_of_business_growth"] = _safe_float(item[rev_filter], default=0.0)
+                            if nocf_filter is not None:
+                                target_metrics["nocf_per_share_growth_rate"] = _safe_float(item[nocf_filter], default=0.0)
+                    except Exception:
+                        continue
+
+                begin += len(stock_list)
+                page_count += 1
+
+            if sector_ps_values:
+                target_metrics["sector_median_ps"] = round(float(pd.Series(sector_ps_values).median()), 4)
+            return target_metrics
+        except Exception as e:
+            logger.error(f"Error getting stock filter metrics for {symbol}: {e}")
+            return {}
 
     def get_hk_historical_klines(self, code, num_days=60):
         """

@@ -12,3 +12,4 @@ scipy>=1.10.0
 futu-api>=3.0.0
 tinydb>=4.7.0
 httpx>=0.24.0
+google-genai>=0.7.0

@@ -279,87 +279,65 @@ def build_current_day_indicator(
     today_row: pd.Series,
     stock_snapshot: Dict[str, Any],
     date_col: str,
-    vol_col: str,
-    total_recent_volume: float,
     latest_tag: str
 ) -> Dict[str, Any]:
     """Build compact current-day snapshot fields."""
-    day_volume = _safe_float(today_row.get(vol_col, 0.0))
-    volume_ratio = (day_volume / total_recent_volume) if total_recent_volume > 0 else 0.0
-
-    preclose = _safe_float(
-        stock_snapshot.get("prev_close")
-        or stock_snapshot.get("prev_close_price")
-        or stock_snapshot.get("pre_close"),
-        0.0,
-    )
-    intraday_den = preclose if preclose > 0 else max(_safe_float(today_row.get("close"), 0.0), 1e-6)
-    intraday_range_pct = (_safe_float(today_row.get("high")) - _safe_float(today_row.get("low"))) / intraday_den * 100.0
     rt_price = _safe_float(stock_snapshot.get("last_price"), _safe_float(today_row.get("close"), 0.0))
 
     return {
         "date": str(today_row.get(date_col, "")),
         "rt_price": round(rt_price, 3),
-        "open": round(_safe_float(today_row.get("open")), 3),
-        "high": round(_safe_float(today_row.get("high")), 3),
-        "low": round(_safe_float(today_row.get("low")), 3),
-        "close": round(_safe_float(today_row.get("close")), 3),
-        "change_rate": round(_safe_float(today_row.get("change_rate")), 2),
         "bias20": round(_safe_float(today_row.get("bias20")), 2),
-        "volume_ratio": round(max(0.0, volume_ratio), 4),
         "tag_today": latest_tag,
-        "intraday_range_pct": round(intraday_range_pct, 2),
     }
-
-
-def _calculate_price_range_metrics(high_series, low_series, close_t):
-    """计算10日内部形态判定所需的振幅与水位（不对外单独暴露）。"""
-    high_10d_max = _safe_float(high_series.max())
-    low_10d_min = _safe_float(low_series.min())
-    amp_den = max(low_10d_min, 1e-6)
-    amp_10d_pct = (high_10d_max - low_10d_min) / amp_den * 100.0
-
-    close_percentile_10d = 0.5
-    if high_10d_max > low_10d_min:
-        close_percentile_10d = (close_t - low_10d_min) / (high_10d_max - low_10d_min)
-    close_percentile_10d = max(0.0, min(1.0, close_percentile_10d))
-    
-    return amp_10d_pct, close_percentile_10d, high_10d_max, low_10d_min
 
 def _calculate_max_contiguous_drop_pct(close_series: pd.Series) -> float:
     """
-    计算窗口内“连续最大跌幅”（单位：pct 点，负值）。
-    示例: [+1, -3, -4, +2, -5] -> -7（对应 -3 + -4）。
+    计算窗口内“连续最大跌幅”（单位：%，负值）。
+    口径：先转 log return 做可加和区间搜索，再还原为复合收益率。
     """
-    changes = pd.to_numeric(close_series, errors="coerce").pct_change().dropna() * 100.0
-    if changes.empty:
+    returns = pd.to_numeric(close_series, errors="coerce").pct_change().dropna()
+    returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
+    if returns.empty:
         return 0.0
+    # 避免 log1p(-1) 无穷
+    returns = returns[returns > -0.999999]
+    if returns.empty:
+        return 0.0
+    log_returns = np.log1p(returns).to_numpy(dtype=float)
 
-    min_ending_here = float(changes.iloc[0])
-    min_so_far = float(changes.iloc[0])
-    for val in changes.iloc[1:]:
-        x = float(val)
-        min_ending_here = min(x, min_ending_here + x)
+    min_ending_here = float(log_returns[0])
+    min_so_far = float(log_returns[0])
+    for x in log_returns[1:]:
+        min_ending_here = min(float(x), min_ending_here + float(x))
         min_so_far = min(min_so_far, min_ending_here)
-    return min(0.0, min_so_far)
+
+    compounded = np.expm1(min_so_far) * 100.0
+    return min(0.0, float(compounded))
 
 
 def _calculate_max_contiguous_up_pct(close_series: pd.Series) -> float:
     """
-    计算窗口内“连续最大涨幅”（单位：pct 点，正值）。
-    示例: [+1, -3, -4, +2, +5] -> +7（对应 +2 + +5）。
+    计算窗口内“连续最大涨幅”（单位：%，正值）。
+    口径：先转 log return 做可加和区间搜索，再还原为复合收益率。
     """
-    changes = pd.to_numeric(close_series, errors="coerce").pct_change().dropna() * 100.0
-    if changes.empty:
+    returns = pd.to_numeric(close_series, errors="coerce").pct_change().dropna()
+    returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
+    if returns.empty:
         return 0.0
+    returns = returns[returns > -0.999999]
+    if returns.empty:
+        return 0.0
+    log_returns = np.log1p(returns).to_numpy(dtype=float)
 
-    max_ending_here = float(changes.iloc[0])
-    max_so_far = float(changes.iloc[0])
-    for val in changes.iloc[1:]:
-        x = float(val)
-        max_ending_here = max(x, max_ending_here + x)
+    max_ending_here = float(log_returns[0])
+    max_so_far = float(log_returns[0])
+    for x in log_returns[1:]:
+        max_ending_here = max(float(x), max_ending_here + float(x))
         max_so_far = max(max_so_far, max_ending_here)
-    return max(0.0, max_so_far)
+
+    compounded = np.expm1(max_so_far) * 100.0
+    return max(0.0, float(compounded))
 
 
 def _calculate_risk_metrics(high_series, low_series, close_series):
@@ -372,18 +350,6 @@ def _calculate_risk_metrics(high_series, low_series, close_series):
     max_drawdown_10d_pct = _safe_float(drawdown_series.max(), 0.0) * 100.0
     
     return max_cum_up_10d_pct, max_cum_drop_10d_pct, max_drawdown_10d_pct
-
-def _derive_shape_10d_tag(amp_10d_pct: float, close_percentile_10d: float) -> str:
-    """10日形态标签：只保留一个结构化输出字段。"""
-    if amp_10d_pct < 4 and close_percentile_10d >= 0.7:
-        return "窄幅压缩后上沿试探"
-    if amp_10d_pct < 4 and close_percentile_10d <= 0.3:
-        return "窄幅压缩后下沿承压"
-    if amp_10d_pct >= 10 and close_percentile_10d >= 0.6:
-        return "高波动上行推进"
-    if amp_10d_pct >= 10 and close_percentile_10d <= 0.4:
-        return "高波动下行探底"
-    return "区间震荡"
 
 def _build_short_window_price_distribute(
     last_n: pd.DataFrame,
@@ -471,21 +437,15 @@ def build_short_window_indicator(
     last_n: pd.DataFrame,
     window_target: int = 10,
 ) -> Dict[str, Any]:
-    """Build simplified 10-day summary: up/down risk + shape tag only."""
+    """Build simplified 10-day summary: risk + chip distribution."""
     window_used = int(len(last_n))
 
     high_series = pd.to_numeric(last_n.get("high", last_n["close"]), errors="coerce").fillna(last_n["close"])
     low_series = pd.to_numeric(last_n.get("low", last_n["close"]), errors="coerce").fillna(last_n["close"])
     close_series = pd.to_numeric(last_n["close"], errors="coerce").fillna(0.0)
-    close_t = _safe_float(close_series.iloc[-1]) if len(close_series) > 0 else 0.0
-
-    amp_10d_pct, close_percentile_10d, high_10d_max, _ = _calculate_price_range_metrics(
-        high_series, low_series, close_t
-    )
     max_cum_up_10d_pct, max_cum_drop_10d_pct, max_drawdown_10d_pct = _calculate_risk_metrics(
         high_series, low_series, close_series
     )
-    shape_10d_tag = _derive_shape_10d_tag(amp_10d_pct, close_percentile_10d)
     chip_dist = _build_short_window_price_distribute(last_n, bucket_count=5, top_k=3)
 
     return {
@@ -494,14 +454,13 @@ def build_short_window_indicator(
         "short_window_incomplete": window_used < window_target,
         "max_cum_up_10d_pct": round(max_cum_up_10d_pct, 2),
         "max_cum_drop_10d_pct": round(max_cum_drop_10d_pct, 2),
-        "max_drawdown_10d_pct": round(max_drawdown_10d_pct, 2),
-        "shape_10d_tag": shape_10d_tag,
+        "max_drawdown_10d_pct": round(-abs(max_drawdown_10d_pct), 2),
         "short_window_price_distribute": chip_dist["short_window_price_distribute"],
         "poc_range_10d": chip_dist["poc_range_10d"],
         "poc_ratio_10d_pct": chip_dist["poc_ratio_10d_pct"],
     }
 
-def _empty_short_term_payload(lookback_days_short: int, flow_label: str, smart_net: float, retail_net: float) -> Dict[str, Any]:
+def _empty_short_term_payload(lookback_days_short: int, smart_net: float, retail_net: float) -> Dict[str, Any]:
     today = {
         "date": "",
         "rt_price": 0.0,
@@ -519,7 +478,6 @@ def _empty_short_term_payload(lookback_days_short: int, flow_label: str, smart_n
         "max_cum_up_10d_pct": 0.0,
         "max_cum_drop_10d_pct": 0.0,
         "max_drawdown_10d_pct": 0.0,
-        "shape_10d_tag": "数据不足",
         "short_window_price_distribute": [],
         "poc_range_10d": "",
         "poc_ratio_10d_pct": 0.0,
@@ -528,15 +486,10 @@ def _empty_short_term_payload(lookback_days_short: int, flow_label: str, smart_n
         "window_target": lookback_days_short,
         "window_used": 0,
         "short_window_incomplete": True,
-        "current_price": 0.0,
-        "price_source": "NO_DATA_FALLBACK",
-        "flow_label": flow_label,
         "smart_net_wan": smart_net,
         "retail_net_wan": retail_net,
-        "latest_tech_tag": "数据不足",
         "today": today,
         "summary_10d": summary_10d,
-        "recent_days": {"today": today, "summary_10d": summary_10d},
     }
 
 def _prepare_short_term_dataset(
@@ -606,28 +559,13 @@ def _prepare_short_term_dataset(
     d_current["a20"] = d_current["v20"].diff()
     d_current["bias20"] = (close - d_current["ema20"]) / d_current["ema20"] * 100.0
 
-    vol_col = None
-    for candidate in ("volume", "turnover", "amount"):
-        if candidate in d_current.columns:
-            d_current[candidate] = pd.to_numeric(d_current[candidate], errors="coerce")
-            if d_current[candidate].notna().any():
-                vol_col = candidate
-                break
-    if vol_col is None:
-        d_current["_volume_proxy"] = 1.0
-        vol_col = "_volume_proxy"
-    d_current[vol_col] = pd.to_numeric(d_current[vol_col], errors="coerce").fillna(0.0).clip(lower=0.0)
-
     last_n = d_current.tail(min(lookback_days_short, len(d_current))).copy().reset_index(drop=True)
-    total_recent_volume = float(last_n[vol_col].sum()) if vol_col in last_n.columns else 0.0
 
     return {
         "date_col": date_col,
         "current_price": current_price,
         "d_current": d_current,
-        "vol_col": vol_col,
         "last_n": last_n,
-        "total_recent_volume": total_recent_volume,
     }
 
 
@@ -641,24 +579,22 @@ def build_short_term_memory(
     from src.api.futu.client import futu_client
 
     if klines_df is None or klines_df.empty:
-        flow_label, smart_net, retail_net = futu_client.analyze_capital_flow(
+        _, smart_net, retail_net = futu_client.analyze_capital_flow(
             capital_data, float(stock_snapshot.get("change_rate", 0.0))
         )
-        return _empty_short_term_payload(lookback_days_short, flow_label, smart_net, retail_net)
+        return _empty_short_term_payload(lookback_days_short, smart_net, retail_net)
 
     try:
         prepared = _prepare_short_term_dataset(klines_df, stock_snapshot, lookback_days_short)
     except ValueError:
-        return _empty_short_term_payload(lookback_days_short, "数据缺失", 0.0, 0.0)
+        return _empty_short_term_payload(lookback_days_short, 0.0, 0.0)
 
     date_col = prepared["date_col"]
     current_price = prepared["current_price"]
     d_current = prepared["d_current"]
-    vol_col = prepared["vol_col"]
     last_n = prepared["last_n"]
-    total_recent_volume = prepared["total_recent_volume"]
 
-    flow_label, smart_net, retail_net = futu_client.analyze_capital_flow(
+    _, smart_net, retail_net = futu_client.analyze_capital_flow(
         capital_data, float(stock_snapshot.get("change_rate", 0.0))
     )
 
@@ -672,8 +608,6 @@ def build_short_term_memory(
         today_row=last_n.iloc[-1],
         stock_snapshot=stock_snapshot,
         date_col=date_col,
-        vol_col=vol_col,
-        total_recent_volume=total_recent_volume,
         latest_tag=latest_tag,
     )
     summary_10d = build_short_window_indicator(
@@ -682,22 +616,77 @@ def build_short_term_memory(
     )
 
     return {
-        # Keep top-level compatibility for prompt consumers, but source from summary_10d only.
         "window_target": summary_10d["window_target"],
         "window_used": summary_10d["window_used"],
         "short_window_incomplete": summary_10d["short_window_incomplete"],
-        "current_price": round(float(current_price), 3),
-        "price_source": "REALTIME_LAST_PRICE_APPEND",
-        "flow_label": flow_label,
         "smart_net_wan": smart_net,
         "retail_net_wan": retail_net,
-        "latest_tech_tag": latest_tag,
         "today": today,
         "summary_10d": summary_10d,
-        "recent_days": {"today": today, "summary_10d": summary_10d},
     }
 
-def hk_basic_finance_data(stock_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+def calculate_hk_capital_flow(symbol: str, window_days: int = 5) -> Dict[str, Any]:
+    """
+    计算港股指定窗口（如 5/10/90）的资金流向聚合结果。
+    """
+    from src.api.futu.client import futu_client
+
+    window_days = max(1, int(window_days))
+    flow_df = futu_client.get_capital_flow_history(symbol, window_days=max(window_days, 30))
+    if flow_df is None or flow_df.empty:
+        return {
+            "window_days": window_days,
+            "main_in_flow_hkd": 0.0,
+            "total_in_flow_hkd": 0.0,
+            "flow_status_tag": "资金流数据缺失",
+        }
+
+    d = flow_df.copy()
+    for col in ("main_in_flow", "in_flow"):
+        if col in d.columns:
+            d[col] = pd.to_numeric(d[col], errors="coerce")
+        else:
+            d[col] = 0.0
+    d = d.dropna(subset=["in_flow"])
+    if d.empty:
+        return {
+            "window_days": window_days,
+            "main_in_flow_hkd": 0.0,
+            "total_in_flow_hkd": 0.0,
+            "flow_status_tag": "资金流数据缺失",
+        }
+
+    d = d.tail(min(window_days, len(d)))
+    main_in = float(d["main_in_flow"].fillna(0.0).sum())
+    total_in = float(d["in_flow"].fillna(0.0).sum())
+    if main_in > 0 and total_in < 0:
+        tag = "主力逆势吸筹"
+    elif main_in > 0 and total_in >= 0:
+        tag = "主力持续净流入"
+    elif main_in < 0 and total_in < 0:
+        tag = "资金共振流出"
+    elif main_in < 0 <= total_in:
+        tag = "大单撤退/小单承接"
+    else:
+        tag = "资金博弈不明"
+
+    return {
+        "window_days": window_days,
+        "main_in_flow_hkd": round(main_in, 2),
+        "total_in_flow_hkd": round(total_in, 2),
+        "flow_status_tag": tag,
+    }
+
+
+# 兼容用户文档中的拼写
+def caclulate_hk_capital_flow(symbol: str, window_days: int = 5) -> Dict[str, Any]:
+    return calculate_hk_capital_flow(symbol=symbol, window_days=window_days)
+
+
+def hk_basic_finance_data(
+    stock_snapshot: Dict[str, Any],
+    capital_flow_profiles: Optional[Dict[int, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """
     根据 Futu API 的快照提取基本面估值与财务数据。
     """
@@ -719,32 +708,75 @@ def hk_basic_finance_data(stock_snapshot: Dict[str, Any]) -> Dict[str, Any]:
             return f"{round(val / 1_0000_0000.0, 2)}亿"
         return f"{round(val / 1_0000.0, 2)}万"
 
-    def _fmt_ratio(val: float, raw: Any) -> str:
+    def _fmt_ratio(val: float, raw: Any, digits: int = 2) -> str:
         if _is_missing(raw):
             return "无数据"
-        return f"{round(val, 2)}"
+        return f"{round(val, digits)}"
+
+    def _fmt_percent(val: float, raw: Any, digits: int = 2) -> str:
+        if _is_missing(raw):
+            return "无数据"
+        return f"{round(val, digits)}%"
+
+    def _fmt_shares(val: float, raw: Any) -> str:
+        if _is_missing(raw):
+            return "无数据"
+        if abs(val) > 1_0000_0000:
+            return f"{round(val / 1_0000_0000.0, 2)}亿股"
+        if abs(val) > 1_0000:
+            return f"{round(val / 1_0000.0, 2)}万股"
+        return f"{round(val, 0)}股"
+
+    capital_flow_profiles = capital_flow_profiles or {}
 
     total_market_val_raw = stock_snapshot.get("total_market_val")
     circular_market_val_raw = stock_snapshot.get("circular_market_val")
-    net_profit_raw = stock_snapshot.get("net_profit")
-    pe_ratio_raw = stock_snapshot.get("pe_ratio")
-    pe_ttm_ratio_raw = stock_snapshot.get("pe_ttm_ratio")
+    net_asset_raw = stock_snapshot.get("net_asset")
+    earning_per_share_raw = stock_snapshot.get("earning_per_share")
+    net_asset_per_share_raw = stock_snapshot.get("net_asset_per_share")
     pb_ratio_raw = stock_snapshot.get("pb_ratio")
+    issued_shares_raw = stock_snapshot.get("issued_shares")
+    outstanding_shares_raw = stock_snapshot.get("outstanding_shares")
+
+    ps_ttm_raw = stock_snapshot.get("ps_ttm")
 
     total_market_val = _safe_float(total_market_val_raw, 0.0)
     circular_market_val = _safe_float(circular_market_val_raw, 0.0)
-    net_profit = _safe_float(net_profit_raw, 0.0)
-    pe_ratio = _safe_float(pe_ratio_raw, 0.0)
-    pe_ttm_ratio = _safe_float(pe_ttm_ratio_raw, 0.0)
+    net_asset = _safe_float(net_asset_raw, 0.0)
+    earning_per_share = _safe_float(earning_per_share_raw, 0.0)
+    net_asset_per_share = _safe_float(net_asset_per_share_raw, 0.0)
     pb_ratio = _safe_float(pb_ratio_raw, 0.0)
+    issued_shares = _safe_float(issued_shares_raw, 0.0)
+    outstanding_shares = _safe_float(outstanding_shares_raw, 0.0)
+    ps_ttm = _safe_float(ps_ttm_raw, 0.0)
+
+    flow_5d = capital_flow_profiles.get(5, {})
+    flow_10d = capital_flow_profiles.get(10, {})
+    flow_90d = capital_flow_profiles.get(90, {})
+    final_flow_tag = (
+        flow_5d.get("flow_status_tag")
+        or flow_10d.get("flow_status_tag")
+        or flow_90d.get("flow_status_tag")
+        or "资金博弈不明"
+    )
 
     return {
         "total_market_val": _fmt_amount(total_market_val, total_market_val_raw),
         "circular_market_val": _fmt_amount(circular_market_val, circular_market_val_raw),
-        "net_profit": _fmt_amount(net_profit, net_profit_raw),
-        "pe_ratio": _fmt_ratio(pe_ratio, pe_ratio_raw),
-        "pe_ttm_ratio": _fmt_ratio(pe_ttm_ratio, pe_ttm_ratio_raw),
+        "issued_shares": _fmt_shares(issued_shares, issued_shares_raw),
+        "outstanding_shares": _fmt_shares(outstanding_shares, outstanding_shares_raw),
+        "net_asset": _fmt_amount(net_asset, net_asset_raw),
+        "earning_per_share": _fmt_ratio(earning_per_share, earning_per_share_raw, digits=3),
+        "net_asset_per_share": _fmt_ratio(net_asset_per_share, net_asset_per_share_raw, digits=3),
         "pb_ratio": _fmt_ratio(pb_ratio, pb_ratio_raw),
+        "ps_ttm": _fmt_ratio(ps_ttm, ps_ttm_raw),
+        "main_in_flow_5d": _fmt_amount(_safe_float(flow_5d.get("main_in_flow_hkd"), 0.0), flow_5d.get("main_in_flow_hkd")),
+        "total_in_flow_5d": _fmt_amount(_safe_float(flow_5d.get("total_in_flow_hkd"), 0.0), flow_5d.get("total_in_flow_hkd")),
+        "main_in_flow_10d": _fmt_amount(_safe_float(flow_10d.get("main_in_flow_hkd"), 0.0), flow_10d.get("main_in_flow_hkd")),
+        "total_in_flow_10d": _fmt_amount(_safe_float(flow_10d.get("total_in_flow_hkd"), 0.0), flow_10d.get("total_in_flow_hkd")),
+        "main_in_flow_90d": _fmt_amount(_safe_float(flow_90d.get("main_in_flow_hkd"), 0.0), flow_90d.get("main_in_flow_hkd")),
+        "total_in_flow_90d": _fmt_amount(_safe_float(flow_90d.get("total_in_flow_hkd"), 0.0), flow_90d.get("total_in_flow_hkd")),
+        "flow_status_tag": final_flow_tag,
     }
 
 
