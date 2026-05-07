@@ -119,7 +119,11 @@ class LLMAnalyst:
     - poc_ratio_pct (90日主筹码峰占比): {mid_trend.get('poc_ratio_pct')}
 
     请按以下结构输出（Markdown）：
-    1. 核心结论（先给方向，40-80字）
+    1. 核心结论（先给方向，40-80字，必须含量化打分）
+       * 第一行固定格式：`【量化综合做多指数：评级(如★★★★☆) (X/100) - 一句话方向总结】`
+       * “-”右侧的“一句话方向总结”必填，不可省略；示例：`右侧爆发临界点，强烈买入`
+       * `X` 取值 0-100（整数）；`0-39=★`，`40-59=★★`，`60-74=★★★`，`75-89=★★★★`，`90-100=★★★★★`
+       * 第二行用 40-80 字给出方向结论，并解释该分数最关键的 1-2 个驱动因子；需与第一行方向保持一致。
     2. 基本面与估值透视（中长期推演，150-250字）
        * 严禁单纯罗列数据，必须穿透财务快照形成定价逻辑。
        * 重塑估值锚：对于轻资产科技股（18C等），严禁使用 BPS/PB 评估安全边际，必须使用 PS (市销率)；并通过联网检索全球1-2家最可比公司（优先美股）PS做对标，明确给出“稀缺性溢价”或“严重低估”结论。
@@ -256,18 +260,16 @@ class LLMAnalyst:
                 build_short_term_memory,
                 build_mid_term_trend,
                 hk_basic_finance_data,
-                calculate_hk_capital_flow,
+                calculate_hk_capital_flow_profiles,
             )
             short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
             mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
             finance_snapshot = {**stock, **full_snapshot}
-            capital_flow_profiles = {}
-            for window in (5, 10, 90):
-                capital_flow_profiles[window] = await asyncio.to_thread(
-                    calculate_hk_capital_flow,
-                    standard_symbol,
-                    window,
-                )
+            capital_flow_profiles = await asyncio.to_thread(
+                calculate_hk_capital_flow_profiles,
+                standard_symbol,
+                (5, 10, 90),
+            )
             fundamental_data = hk_basic_finance_data(
                 finance_snapshot,
                 capital_flow_profiles=capital_flow_profiles,

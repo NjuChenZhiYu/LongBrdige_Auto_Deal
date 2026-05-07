@@ -15,7 +15,7 @@ from src.api.futu.client import futu_client
 from src.analysis.futu_math_indicator import (
     build_mid_term_trend,
     build_short_term_memory,
-    calculate_hk_capital_flow,
+    calculate_hk_capital_flow_profiles,
     hk_basic_finance_data,
 )
 from src.services.llm_analyst import LLMAnalyst
@@ -72,11 +72,7 @@ def generate_prompt_file(
     short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
     mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
     finance_snapshot = {**stock, **full_snapshot}
-    capital_flow_profiles = {
-        5: calculate_hk_capital_flow(standard_symbol, 5),
-        10: calculate_hk_capital_flow(standard_symbol, 10),
-        90: calculate_hk_capital_flow(standard_symbol, 90),
-    }
+    capital_flow_profiles = calculate_hk_capital_flow_profiles(standard_symbol, (5, 10, 90))
     fundamental_data = hk_basic_finance_data(
         finance_snapshot,
         capital_flow_profiles=capital_flow_profiles,

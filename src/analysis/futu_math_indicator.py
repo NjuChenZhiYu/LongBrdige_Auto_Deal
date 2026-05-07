@@ -625,14 +625,9 @@ def build_short_term_memory(
         "summary_10d": summary_10d,
     }
 
-def calculate_hk_capital_flow(symbol: str, window_days: int = 5) -> Dict[str, Any]:
-    """
-    计算港股指定窗口（如 5/10/90）的资金流向聚合结果。
-    """
-    from src.api.futu.client import futu_client
-
+def _aggregate_hk_capital_flow_from_df(flow_df: Optional[pd.DataFrame], window_days: int) -> Dict[str, Any]:
+    """Aggregate HK capital flow for a specific window from preloaded historical data."""
     window_days = max(1, int(window_days))
-    flow_df = futu_client.get_capital_flow_history(symbol, window_days=max(window_days, 30))
     if flow_df is None or flow_df.empty:
         return {
             "window_days": window_days,
@@ -676,6 +671,31 @@ def calculate_hk_capital_flow(symbol: str, window_days: int = 5) -> Dict[str, An
         "total_in_flow_hkd": round(total_in, 2),
         "flow_status_tag": tag,
     }
+
+
+def calculate_hk_capital_flow(symbol: str, window_days: int = 5) -> Dict[str, Any]:
+    """
+    计算港股指定窗口（如 5/10/90）的资金流向聚合结果。
+    """
+    from src.api.futu.client import futu_client
+
+    flow_df = futu_client.get_capital_flow_history(symbol, window_days=max(int(window_days), 90))
+    return _aggregate_hk_capital_flow_from_df(flow_df, window_days=window_days)
+
+
+def calculate_hk_capital_flow_profiles(
+    symbol: str,
+    windows: Optional[tuple] = (5, 10, 90),
+) -> Dict[int, Dict[str, Any]]:
+    """
+    一次拉取资金流历史，然后复用计算多个窗口（默认 5/10/90），减少重复远端请求。
+    """
+    from src.api.futu.client import futu_client
+
+    windows = tuple(sorted({max(1, int(w)) for w in (windows or (5, 10, 90))}))
+    max_window = max(windows) if windows else 90
+    flow_df = futu_client.get_capital_flow_history(symbol, window_days=max(max_window, 90))
+    return {w: _aggregate_hk_capital_flow_from_df(flow_df, window_days=w) for w in windows}
 
 
 # 兼容用户文档中的拼写
