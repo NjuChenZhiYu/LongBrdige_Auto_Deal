@@ -81,7 +81,6 @@ class LLMAnalyst:
     - 每股盈利(EPS)：{fundamental_data.get('earning_per_share', '无数据')}
     - 每股净资产(BPS)：{fundamental_data.get('net_asset_per_share', '无数据')}
     - PB：{fundamental_data.get('pb_ratio', '无数据')}
-    - PS(TTM)：{fundamental_data.get('ps_ttm', '无数据')}
 
     【筹码与流动性档案】
     - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_5d', '无数据')}

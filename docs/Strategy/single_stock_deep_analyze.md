@@ -247,7 +247,7 @@ def _build_semantic_memory(klines_df, snapshot, capital_data) -> dict:
 总市值：{total_market_val}，流通市值：{circular_market_val}
 总股本：{issued_shares}，流通股本：{outstanding_shares}
 资产净值：{net_asset}，每股盈利(EPS)：{earning_per_share}，每股净资产(BPS)：{net_asset_per_share}
-PB：{pb_ratio}，PS(TTM)：{ps_ttm}
+PB：{pb_ratio}
 
 【筹码与流动性档案】
 近5日资金：主力大单净流入 {main_in_flow_5d}，整体净流 {total_in_flow_5d}
@@ -258,7 +258,7 @@ PB：{pb_ratio}，PS(TTM)：{ps_ttm}
 【行业对标与相对估值指令】
 严禁使用笼统的“机器人概念”均值。
 请利用你的联网搜索功能，在全球市场（特别是美股）寻找与该标的商业模式最接近的1-2家对标公司。
-获取对标公司的实时或近期PS（市销率）估值，将其作为行业天花板/基准，与该标的当前PS(TTM)做比较。
+获取对标公司的实时或近期PS（市销率）估值，将其作为行业天花板/基准，并与该标的当前估值水平做比较（若本地无PS字段需显式说明）。
 给出结论：当前标的在全球视野下，是存在“稀缺性溢价”还是被“严重低估”。
 
 【实时快照】
