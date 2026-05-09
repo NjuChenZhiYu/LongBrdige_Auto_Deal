@@ -15,6 +15,7 @@ from src.api.futu.client import futu_client
 from src.analysis.futu_math_indicator import (
     build_mid_term_trend,
     build_short_term_memory,
+    calculate_hk_capital_flow_profiles,
     hk_basic_finance_data,
 )
 from src.services.llm_analyst import LLMAnalyst
@@ -54,7 +55,6 @@ def generate_prompt_file(
             valid_plates = plate_data[plate_data["plate_type"].isin(["INDUSTRY", "CONCEPT"])]
             if not valid_plates.empty:
                 plate_info = "、".join(valid_plates["plate_name"].tolist())
-
         # get_special_quotes 返回字段较少，这里补拉完整快照以获取基本面估值字段。
         ret_snap, snap_df = quote_ctx.get_market_snapshot([standard_symbol])
         if ret_snap == 0 and snap_df is not None and not snap_df.empty:
@@ -72,7 +72,11 @@ def generate_prompt_file(
     short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
     mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
     finance_snapshot = {**stock, **full_snapshot}
-    fundamental_data = hk_basic_finance_data(finance_snapshot)
+    capital_flow_profiles = calculate_hk_capital_flow_profiles(standard_symbol, (5, 10, 90))
+    fundamental_data = hk_basic_finance_data(
+        finance_snapshot,
+        capital_flow_profiles=capital_flow_profiles,
+    )
     fundamental_data["plate_info"] = plate_info
 
     prompt = analyst._build_single_stock_prompt(
