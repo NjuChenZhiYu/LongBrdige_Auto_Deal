@@ -84,10 +84,10 @@ class LLMAnalyst:
     - 市盈率TTM：{fundamental_data.get('pe_ttm', '无数据')}
     
     【筹码与流动性档案】
-    - 当日资金（实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_today', '无数据')}
-    - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_5d', '无数据')}
-    - 近10日资金：主力大单净流入 {fundamental_data.get('main_in_flow_10d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_10d', '无数据')}
-    - 近90日资金：主力大单净流入 {fundamental_data.get('main_in_flow_90d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_90d', '无数据')}
+    - 当日资金（实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
+    - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_5d', '无数据')}
+    - 近10日资金：主力大单净流入 {fundamental_data.get('main_in_flow_10d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_10d', '无数据')}
+    - 近90日资金：主力大单净流入 {fundamental_data.get('main_in_flow_90d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_90d', '无数据')}
 
     【短期记忆（近10日）】
     - window_used (实际可用天数): {short_memory.get('window_used')}
@@ -232,10 +232,10 @@ class LLMAnalyst:
     - 夜盘价/涨跌幅：{fundamental_data.get('overnight_price', '无数据')} / {fundamental_data.get('overnight_change_rate', '无数据')}
 
     【筹码与流动性档案】
-    - 当日资金（实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_today', '无数据')}
-    - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_5d', '无数据')}
-    - 近10日资金：主力大单净流入 {fundamental_data.get('main_in_flow_10d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_10d', '无数据')}
-    - 近90日资金：主力大单净流入 {fundamental_data.get('main_in_flow_90d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_90d', '无数据')}
+    - 当日资金（实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
+    - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_5d', '无数据')}
+    - 近10日资金：主力大单净流入 {fundamental_data.get('main_in_flow_10d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_10d', '无数据')}
+    - 近90日资金：主力大单净流入 {fundamental_data.get('main_in_flow_90d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_90d', '无数据')}
 
     【短期记忆（近10日）】
     - window_used (实际可用天数): {short_memory.get('window_used')}
