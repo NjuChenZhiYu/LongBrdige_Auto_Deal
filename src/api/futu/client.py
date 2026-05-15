@@ -474,6 +474,38 @@ class FutuClient:
             logger.error(f"Error getting historical klines for {code}: {e}")
             return None
 
+    def get_historical_klines(self, code: str, num_days: int = 120) -> Optional[pd.DataFrame]:
+        """
+        Market-agnostic historical daily K-lines (works for HK.xxxxx and US.AAPL).
+        Delegates to request_history_kline with QFQ adjustment.
+        """
+        from futu import KLType, AuType
+
+        if not self._quote_ctx:
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for historical klines {code}: {e}")
+                return None
+        try:
+            start_date = (datetime.now() - timedelta(days=num_days + 30)).strftime("%Y-%m-%d")
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            ret, data, _ = self._quote_ctx.request_history_kline(
+                code,
+                start=start_date,
+                end=end_date,
+                ktype=KLType.K_DAY,
+                autype=AuType.QFQ,
+                max_count=num_days + 30,
+            )
+            if ret == 0 and data is not None and not data.empty:
+                return data
+            logger.warning(f"Failed to get historical klines for {code}: {data}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting historical klines for {code}: {e}")
+            return None
+
     def get_stock_basicinfo(self, market: str, security_type: str, code_list=None):
         """
         Get basic stock info including some financial fields.
