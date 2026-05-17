@@ -428,6 +428,7 @@ def build_short_term_memory(
     current_price = prepared["current_price"]
     d_current = prepared["d_current"]
     last_n = prepared["last_n"]
+    use_realtime_price = prepared.get("use_realtime_price", True)
 
     latest_tag = common_calculate_tag_today_by_derivatives(
         d_current=d_current,
@@ -440,6 +441,7 @@ def build_short_term_memory(
         date_col=date_col,
         latest_tag=latest_tag,
         safe_float_fn=common_safe_float,
+        use_realtime_price=use_realtime_price,
     )
     summary_10d = common_build_short_window_indicator(
         last_n=last_n,

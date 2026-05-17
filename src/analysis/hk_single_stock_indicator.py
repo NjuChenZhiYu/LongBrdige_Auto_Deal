@@ -61,7 +61,12 @@ def build_short_term_memory(
         return common_empty_short_term_payload(lookback_days_short, smart_net, retail_net)
 
     try:
-        prepared = common_prepare_short_term_dataset(klines_df, stock_snapshot, lookback_days_short)
+        prepared = common_prepare_short_term_dataset(
+            klines_df,
+            stock_snapshot,
+            lookback_days_short,
+            realtime_session_checker=futu_client.is_realtime_trading_session,
+        )
     except ValueError:
         return common_empty_short_term_payload(lookback_days_short, 0.0, 0.0)
 
@@ -69,6 +74,7 @@ def build_short_term_memory(
     current_price = prepared["current_price"]
     d_current = prepared["d_current"]
     last_n = prepared["last_n"]
+    use_realtime_price = prepared.get("use_realtime_price", True)
 
     _, smart_net, retail_net = futu_client.analyze_capital_flow(
         capital_data, float(stock_snapshot.get("change_rate", 0.0))
@@ -84,6 +90,7 @@ def build_short_term_memory(
         date_col=date_col,
         latest_tag=latest_tag,
         safe_float_fn=common_safe_float,
+        use_realtime_price=use_realtime_price,
     )
     summary_10d = common_build_short_window_indicator(
         last_n=last_n,

@@ -71,6 +71,59 @@ class FutuClient:
                 raise
         return self._quote_ctx
 
+    def is_realtime_trading_session(self, stock_snapshot: Dict[str, Any]) -> bool:
+        """
+        Return True only when Futu confirms the symbol is on a trading day and
+        currently in a continuous trading session.
+        """
+        code = str(stock_snapshot.get("code") or stock_snapshot.get("symbol") or "").split(" ")[0].upper()
+        if not code:
+            return False
+
+        try:
+            from futu import MarketState, RET_OK, TradeDateMarket
+
+            ctx = self.get_quote_context()
+            today = datetime.now().strftime("%Y-%m-%d")
+            market = TradeDateMarket.HK if code.startswith("HK.") else None
+
+            ret_calendar, trading_days = ctx.request_trading_days(
+                market=market,
+                start=today,
+                end=today,
+                code=code,
+            )
+            if ret_calendar != RET_OK:
+                logger.warning(f"[Futu/TradingSession] request_trading_days failed for {code}: {trading_days}")
+                return False
+
+            trading_day_rows = (
+                trading_days.to_dict("records") if hasattr(trading_days, "to_dict") else (trading_days or [])
+            )
+            is_trading_day = any(str(item.get("time")) == today for item in trading_day_rows)
+            if not is_trading_day:
+                return False
+
+            ret_state, state_df = ctx.get_market_state([code])
+            if ret_state != RET_OK or state_df is None or state_df.empty:
+                logger.warning(f"[Futu/TradingSession] get_market_state failed for {code}: {state_df}")
+                return False
+
+            market_state = state_df.iloc[0].get("market_state")
+            open_states = {
+                getattr(MarketState, "MORNING", None),
+                getattr(MarketState, "AFTERNOON", None),
+                getattr(MarketState, "FUTURE_DAY_OPEN", None),
+                getattr(MarketState, "FUTURE_OPEN", None),
+                getattr(MarketState, "FUTURE_BREAK_OVER", None),
+                getattr(MarketState, "NIGHT_OPEN", None),
+            }
+            open_states.discard(None)
+            return market_state in open_states
+        except Exception as e:
+            logger.warning(f"[Futu/TradingSession] realtime session check failed for {code}: {e}")
+            return False
+
     def subscribe(self, symbols, sub_types, is_first_push=True):
         """
         Subscribe with market routing and permission isolation.
