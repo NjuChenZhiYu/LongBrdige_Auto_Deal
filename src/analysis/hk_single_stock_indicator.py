@@ -75,13 +75,20 @@ def build_short_term_memory(
     d_current = prepared["d_current"]
     last_n = prepared["last_n"]
     use_realtime_price = prepared.get("use_realtime_price", True)
+    current_volume = prepared.get("current_volume")
+    current_turnover = prepared.get("current_turnover")
 
     _, smart_net, retail_net = futu_client.analyze_capital_flow(
         capital_data, float(stock_snapshot.get("change_rate", 0.0))
     )
 
     _ema_history = d_current.iloc[:-1].copy().tail(max(20, lookback_days_short))
-    _ema_result = common_calculate_ema_derivatives(_ema_history, current_price)
+    _ema_result = common_calculate_ema_derivatives(
+        _ema_history,
+        current_price,
+        current_volume=current_volume,
+        current_turnover=current_turnover,
+    )
     latest_tag = _ema_result.get("tag_combined", _ema_result.get("tag", "数据不足"))
 
     today = common_build_current_day_indicator(
@@ -288,10 +295,18 @@ def get_today_capital_flow(symbol: str) -> Dict[str, str]:
 
         row = dist_df.iloc[0]
 
-        def _g(col: str) -> float:
-            return float(row.get(col) or 0)
+        def _g(*cols: str) -> float:
+            for col in cols:
+                val = row.get(col)
+                if val is not None and not pd.isna(val):
+                    return float(val)
+            return 0.0
 
-        main_net = (_g("capital_in_super") + _g("capital_in_large")) - (_g("capital_out_super") + _g("capital_out_large"))
+        main_net = (
+            _g("capital_in_super") + _g("capital_in_big", "capital_in_large")
+        ) - (
+            _g("capital_out_super") + _g("capital_out_big", "capital_out_large")
+        )
         retail_net = (_g("capital_in_mid") + _g("capital_in_small")) - (_g("capital_out_mid") + _g("capital_out_small"))
         total_net = main_net + retail_net
 

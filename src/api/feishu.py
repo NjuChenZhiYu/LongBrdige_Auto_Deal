@@ -2,6 +2,8 @@ import aiohttp
 import logging
 import json
 import time
+import ssl
+import certifi
 from typing import Dict
 from config.settings import Settings
 
@@ -46,18 +48,18 @@ class FeishuAlert:
         logger.info(f"Feishu alert cache cleared ({cache_size} entries)")
     
     @classmethod
-    async def send_alert(cls, title: str, content: str):
+    async def send_alert(cls, title: str, content: str) -> bool:
         """
         Send async alert to Feishu with deduplication.
         """
         webhook = Settings.FEISHU_WEBHOOK
         if not webhook:
             logger.warning("FEISHU_WEBHOOK not configured")
-            return
+            return False
         
         # Deduplication check
         if not cls._should_send_alert(title):
-            return
+            return False
 
         # Ensure keyword is present for security verification
         keyword = getattr(Settings, 'FEISHU_KEYWORD', '告警')
@@ -87,13 +89,18 @@ class FeishuAlert:
             }
         }
 
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(webhook, json=data, headers=headers, timeout=10) as response:
+                async with session.post(webhook, json=data, headers=headers, ssl=ssl_context, timeout=10) as response:
                     result = await response.json()
                     if result.get("code") == 0:
                         logger.info(f"Feishu alert sent successfully: {title}")
+                        return True
                     else:
                         logger.error(f"Feishu API error: {result}")
+                        return False
         except Exception as e:
             logger.error(f"Failed to send Feishu alert: {e}")
+            return False

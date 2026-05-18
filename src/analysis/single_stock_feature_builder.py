@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Callable, Dict, Optional
 
 import pandas as pd
@@ -40,6 +40,29 @@ def _should_append_realtime_sample(
 
     # Generic fallback: avoid creating a fake "today" row during weekends.
     return now_dt.weekday() < 5
+
+
+def _parse_snapshot_date(value: Any) -> Optional[date]:
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
+
+
+def _should_use_current_volume(stock_snapshot: Dict[str, Any], now_dt: Optional[datetime] = None) -> bool:
+    """Use same-day volume only after the HK session is close enough to complete."""
+    code = str(stock_snapshot.get("code") or stock_snapshot.get("symbol") or "").strip().upper()
+    if not code.startswith("HK."):
+        return False
+
+    now_dt = now_dt or datetime.now()
+    if (now_dt.hour, now_dt.minute) < (15, 0):
+        return False
+
+    for key in ("update_time", "data_date", "last_trade_time"):
+        if _parse_snapshot_date(stock_snapshot.get(key)) == now_dt.date():
+            return True
+    return False
 
 
 def _add_short_technical_columns(d: pd.DataFrame) -> pd.DataFrame:
@@ -242,8 +265,18 @@ def prepare_short_term_dataset(
         date_col,
         realtime_session_checker=realtime_session_checker,
     )
+    use_current_volume = use_realtime_sample and _should_use_current_volume(stock_snapshot)
+    current_volume = common_safe_float(stock_snapshot.get("volume"), 0.0) if use_current_volume else None
+    current_turnover = common_safe_float(stock_snapshot.get("turnover"), 0.0) if use_current_volume else None
     if not use_realtime_sample:
         current_price = float(d["close"].iloc[-1])
+        current_volume = common_safe_float(d["volume"].iloc[-1], 0.0) if "volume" in d.columns else None
+        if "turnover" in d.columns:
+            current_turnover = common_safe_float(d["turnover"].iloc[-1], 0.0)
+        elif "amount" in d.columns:
+            current_turnover = common_safe_float(d["amount"].iloc[-1], 0.0)
+        else:
+            current_turnover = None
         d = _add_short_technical_columns(d)
         last_n = d.tail(min(lookback_days_short, len(d))).copy().reset_index(drop=True)
         return {
@@ -252,6 +285,8 @@ def prepare_short_term_dataset(
             "d_current": d,
             "last_n": last_n,
             "use_realtime_price": False,
+            "current_volume": current_volume,
+            "current_turnover": current_turnover,
         }
 
     d_current = d.copy()
@@ -262,6 +297,13 @@ def prepare_short_term_dataset(
     latest_row["close"] = current_price
     latest_row["high"] = max(common_safe_float(latest_row.get("high"), current_price), current_price)
     latest_row["low"] = min(common_safe_float(latest_row.get("low"), current_price), current_price)
+    if current_volume is not None and "volume" in d_current.columns:
+        latest_row["volume"] = current_volume
+    if current_turnover is not None:
+        if "turnover" in d_current.columns:
+            latest_row["turnover"] = current_turnover
+        elif "amount" in d_current.columns:
+            latest_row["amount"] = current_turnover
     if date_col in d_current.columns:
         latest_row[date_col] = common_format_rt_time_label(latest_row.get(date_col))
     d_current.loc[len(d_current)] = latest_row
@@ -276,4 +318,6 @@ def prepare_short_term_dataset(
         "d_current": d_current,
         "last_n": last_n,
         "use_realtime_price": True,
+        "current_volume": current_volume,
+        "current_turnover": current_turnover,
     }

@@ -38,36 +38,28 @@
 * **乖离率公式**：$$Bias_{20}(t) = \frac{P_{realtime} - EMA_{20}(t)}{EMA_{20}(t)} \times 100\%$$
 
 ### 2.5 成交量结构 / Volume Regime
-本节给出 `tag_today` 和 `flow_status_tag` 共用的成交量确认因子。所有量能字段均基于已收盘的完整交易日（T-1 锚），盘中不动态更新。
+本节给出 `tag_today` 和 `flow_status_tag` 共用的成交量确认因子。默认基于已收盘完整交易日（T-1 锚）；若港股 15:00 后或盘后已有当天快照，则允许使用当天成交额。
 
 #### 2.5.1 关键字段
-设 $Volume(t)$ 为当日成交股数（仅取已收盘交易日），定义：
+设 $Amount(t)$ 为当日成交额（优先使用 `turnover/amount`，缺失时才回退 `volume`），定义：
 
-- $V_{prev1d}$ = 上个交易日（T-1）成交量
-- $V_{avg5}$ = 最近 5 个完整交易日（D-1..D-5）的平均成交量
-- $V_{avg20}$ = 最近 20 个完整交易日（D-1..D-20）的平均成交量
+- $A_{target}$ = 待判定日成交额（盘后当天或 T-1）
+- $A_{ema5}$ = 待判定日前历史成交额的 5 日 EMA 基准
 
 #### 2.5.2 核心比值
-- $R_{prev1d/5} = V_{prev1d} / V_{avg5}$
-- $R_{prev1d/20} = V_{prev1d} / V_{avg20}$
-- $R_{5/20} = V_{avg5} / V_{avg20}$
+- $R_{target/ema5} = A_{target} / A_{ema5}$
 
 #### 2.5.3 成交量 regime 分类（极端值开关）
 为避免标签组合爆炸，成交量 regime 只保留 **3 档**，并且只有进入“放量/缩量”极端档时才参与 `flow_status_tag` 合成，中性档完全不影响标签：
 
-- **放量**：$R_{prev1d/20} \geq 1.5$ **且** $R_{prev1d/5} \geq 1.3$
-- **缩量**：$R_{prev1d/20} \leq 0.6$ **且** $R_{prev1d/5} \leq 0.7$
+- **放量**：$R_{target/ema5} \geq 1.3$
+- **缩量**：$R_{target/ema5} \leq 0.7$
 - **中性**：其余所有情况，不参与 `flow_status_tag` 合成
 
 阈值说明：
 
-- 双确认（同时打过 5 日和 20 日均量）用来滤掉“单点偏离 5 日均量但 20 日整体没异常”的伪信号。
-- 1.5x / 0.6x 是港股中等市值标的约 1–1.5 个标准差以外的事件，足够稀有，命中时是真有“事”。如需调整，建议保留双确认结构，仅微调比值（如 1.4 / 0.65 或 1.6 / 0.55）。
-
-辅助观察量 $R_{5/20}$ 仅用于在解释补语中描述周度量能趋势，**不参与硬判定**：
-
-- $R_{5/20} < 1$：过去一周量能低于过去一月，量能趋势退潮
-- $R_{5/20} > 1$：过去一周量能高于过去一月，量能趋势抬头
+- 5 日 EMA 比简单 5 日均值更重视近期成交环境，避免 20 日窗口把新股或近期换手结构变化拉偏。
+- 1.3x / 0.7x 是当前硬开关；若误报偏多，再微调为 1.4x / 0.65x。
 
 ---
 
@@ -242,29 +234,26 @@
     # 4. 计算实时 Bias 乖离率（仅观测，不参与 tag 判定）
     df['Bias20'] = (df['close'] - df['EMA20']) / df['EMA20'] * 100
 
-    # 5. 计算成交量 regime（T-1 锚，3 档开关，双确认阈值）
-    # 注意：volume 字段只取自已收盘的完整交易日；如果 df 末行是为价格而拼接的“合成今日行”，
-    # 则需要先剔除合成行，再计算 volume_prev_1d / volume_avg_5d / volume_avg_20d。
-    closed_df = df[df['volume'].notna()]
-    volume_prev_1d = closed_df['volume'].iloc[-1]
-    volume_avg_5d = closed_df['volume'].tail(5).mean()
-    volume_avg_20d = closed_df['volume'].tail(20).mean()
-    r_prev1d_5d = volume_prev_1d / volume_avg_5d
-    r_prev1d_20d = volume_prev_1d / volume_avg_20d
-    r_5d_20d = volume_avg_5d / volume_avg_20d
+    # 5. 计算成交额 regime（优先 turnover/amount，3 档开关，EMA5 基准）
+    # 注意：15:00 前不使用盘中成交额；15:00 后或盘后可使用当天 turnover。
+    closed_amount = df['turnover'].dropna()
+    amount_target = current_turnover if current_turnover else closed_amount.iloc[-1]
+    amount_baseline = closed_amount if current_turnover else closed_amount.iloc[:-1]
+    amount_ema5 = amount_baseline.ewm(span=5, adjust=False).mean().iloc[-1]
+    r_target_ema5 = amount_target / amount_ema5
 
-    if r_prev1d_20d >= 1.5 and r_prev1d_5d >= 1.3:
+    if r_target_ema5 >= 1.3:
         volume_regime = "放量"
-    elif r_prev1d_20d <= 0.6 and r_prev1d_5d <= 0.7:
+    elif r_target_ema5 <= 0.7:
         volume_regime = "缩量"
     else:
         volume_regime = "中性"
     ```
 4.  **`tag_today` 判定**：保持只用 `V20 / V5 / A5` 输出 6 种趋势形态；`Bias20` 不参与判定，仅作为观测字段透传。
 5.  **`flow_status_tag` 合成**：严格执行 §4.3 的 3 条覆盖规则 + 1 条默认规则；不要再写额外分支。
-    - `volume_regime` 仅 3 档（放量 / 中性 / 缩量），双确认阈值固定为 `R_prev1d_20d ≥ 1.5 且 R_prev1d_5d ≥ 1.3`（放量）、`R_prev1d_20d ≤ 0.6 且 R_prev1d_5d ≤ 0.7`（缩量）。
+    - `volume_regime` 仅 3 档（放量 / 中性 / 缩量），阈值固定为 `R_target_ema5 ≥ 1.3`（放量）、`R_target_ema5 ≤ 0.7`（缩量）。
     - 中性量能不参与合成，`flow_status_tag` 直接走默认（`tag_today` + 资金流补语）。
-6.  **数据源约束**：`flow_status_tag` 的资金流统一使用 `_aggregate_hk_capital_flow_from_df`（与研报 1D/5D/20D/90D 同源），不再调用 `analyze_capital_flow` 的盘中分布口径；成交量统一使用 T-1 锚的完整交易日数据，禁止任何盘中折算。
+6.  **数据源约束**：`flow_status_tag` 的资金流统一使用 `_aggregate_hk_capital_flow_from_df`（与研报 1D/5D/20D/90D 同源），不再调用 `analyze_capital_flow` 的盘中分布口径；成交额 15:00 前使用 T-1 锚，15:00 后或盘后可使用当天快照，不做盘中折算。
 7.  **研报调用方修改**：在 `src/services/llm_analyst.py` 中调用该函数时，必须将当前盘中价格 `stock['last_price']` 传入：
     ```python
     ema_data = calculate_ema_derivatives(klines_df, current_price=price)

@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 from futu import OpenQuoteContext, SysConfig
 from config.settings import Settings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,13 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _parse_snapshot_date(value: Any) -> Optional[date]:
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
 
 class FutuClient:
     _instance = None
@@ -73,8 +80,11 @@ class FutuClient:
 
     def is_realtime_trading_session(self, stock_snapshot: Dict[str, Any]) -> bool:
         """
-        Return True only when Futu confirms the symbol is on a trading day and
-        currently in a continuous trading session.
+        Return True when a symbol should use the current trading day's snapshot.
+
+        During continuous trading this is live intraday data. After market close
+        on a trading day, Futu snapshots still carry today's update date, so they
+        should be used instead of falling back to the previous daily close.
         """
         code = str(stock_snapshot.get("code") or stock_snapshot.get("symbol") or "").split(" ")[0].upper()
         if not code:
@@ -104,6 +114,11 @@ class FutuClient:
             if not is_trading_day:
                 return False
 
+            for key in ("update_time", "data_date", "last_trade_time"):
+                snapshot_date = _parse_snapshot_date(stock_snapshot.get(key))
+                if snapshot_date == datetime.now().date():
+                    return True
+
             ret_state, state_df = ctx.get_market_state([code])
             if ret_state != RET_OK or state_df is None or state_df.empty:
                 logger.warning(f"[Futu/TradingSession] get_market_state failed for {code}: {state_df}")
@@ -119,7 +134,15 @@ class FutuClient:
                 getattr(MarketState, "NIGHT_OPEN", None),
             }
             open_states.discard(None)
-            return market_state in open_states
+            market_state_name = getattr(market_state, "name", str(market_state)).upper()
+            return market_state in open_states or market_state_name in {
+                "MORNING",
+                "AFTERNOON",
+                "FUTURE_DAY_OPEN",
+                "FUTURE_OPEN",
+                "FUTURE_BREAK_OVER",
+                "NIGHT_OPEN",
+            }
         except Exception as e:
             logger.warning(f"[Futu/TradingSession] realtime session check failed for {code}: {e}")
             return False
@@ -323,7 +346,12 @@ class FutuClient:
                             'name': name,
                             'last_price': last_price,
                             'change_rate': change_rate,
-                            'prev_close': prev_close
+                            'prev_close': prev_close,
+                            'volume': row.get('volume', 0),
+                            'turnover': row.get('turnover', 0),
+                            'update_time': row.get('update_time', ''),
+                            'data_date': row.get('data_date', ''),
+                            'data_time': row.get('data_time', ''),
                         })
                 return quotes
             else:
@@ -591,15 +619,22 @@ class FutuClient:
             # Assuming data is a DataFrame with one row
             row = capital_data.iloc[0]
             
-            in_super = float(row.get('capital_in_super', 0))
-            in_large = float(row.get('capital_in_large', 0))
-            out_super = float(row.get('capital_out_super', 0))
-            out_large = float(row.get('capital_out_large', 0))
+            def _g(*cols: str) -> float:
+                for col in cols:
+                    val = row.get(col)
+                    if val is not None and not pd.isna(val):
+                        return float(val)
+                return 0.0
+
+            in_super = _g('capital_in_super')
+            in_large = _g('capital_in_big', 'capital_in_large')
+            out_super = _g('capital_out_super')
+            out_large = _g('capital_out_big', 'capital_out_large')
             
-            in_mid = float(row.get('capital_in_mid', 0))
-            in_small = float(row.get('capital_in_small', 0))
-            out_mid = float(row.get('capital_out_mid', 0))
-            out_small = float(row.get('capital_out_small', 0))
+            in_mid = _g('capital_in_mid')
+            in_small = _g('capital_in_small')
+            out_mid = _g('capital_out_mid')
+            out_small = _g('capital_out_small')
             
             # Smart Money Net = (Super In + Large In) - (Super Out + Large Out)
             smart_net = (in_super + in_large) - (out_super + out_large)

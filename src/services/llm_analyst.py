@@ -407,8 +407,11 @@ class LLMAnalyst:
 🧠 **AI模型**：{self.us_model}"""
 
             title = f"[美股单股深度研报] {standard_symbol} ({current_time})"
-            await FeishuAlert.send_alert(title, full_report)
-            logger.info(f"[Gemini/USSingleStock] report sent successfully: {standard_symbol}")
+            alert_sent = await FeishuAlert.send_alert(title, full_report)
+            if alert_sent:
+                logger.info(f"[Gemini/USSingleStock] report sent to Feishu successfully: {standard_symbol}")
+            else:
+                logger.error(f"[Gemini/USSingleStock] report generated but Feishu send failed: {standard_symbol}")
 
             return {
                 "ok": True,
@@ -510,8 +513,11 @@ class LLMAnalyst:
 🧠 **AI模型**：{self.us_model}"""
 
             title = f"[单股深度研报] {standard_symbol} ({current_time})"
-            await FeishuAlert.send_alert(title, full_report)
-            logger.info(f"[Gemini/SingleStock] report sent successfully: {standard_symbol}")
+            alert_sent = await FeishuAlert.send_alert(title, full_report)
+            if alert_sent:
+                logger.info(f"[Gemini/SingleStock] report sent to Feishu successfully: {standard_symbol}")
+            else:
+                logger.error(f"[Gemini/SingleStock] report generated but Feishu send failed: {standard_symbol}")
 
             return {
                 "ok": True,
@@ -987,8 +993,11 @@ class LLMAnalyst:
             
             # Send to Feishu
             title = f"[Gemini研报] 港股市场观察 ({current_time})"
-            await FeishuAlert.send_alert(title, full_report)
-            logger.info(f"[Gemini/Futu] Report sent to Feishu successfully")
+            alert_sent = await FeishuAlert.send_alert(title, full_report)
+            if alert_sent:
+                logger.info(f"[Gemini/Futu] Report sent to Feishu successfully")
+            else:
+                logger.error(f"[Gemini/Futu] Report generated but Feishu send failed")
                 
         except Exception as e:
             import traceback

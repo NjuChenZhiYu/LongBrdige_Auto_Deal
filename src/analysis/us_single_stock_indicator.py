@@ -396,7 +396,7 @@ def build_short_term_memory(
         retail_net_wan = (sml_in_flow + mid_in_flow) 10-day cumulative (万)
 
     If capital_data contains intraday-distribution columns instead
-    (capital_in_large, capital_in_mid, …), falls back to
+    (capital_in_big/capital_in_large, capital_in_mid, …), falls back to
     futu_client.analyze_capital_flow for backward compatibility.
     """
     from src.api.futu.client import futu_client
