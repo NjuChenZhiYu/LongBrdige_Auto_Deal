@@ -415,7 +415,6 @@ def build_mid_term_trend(
     used = len(d_current)
     mid_features = common_build_mid_trade_features(d_current, lookback_days_mid=lookback_days_mid)
     poc = common_calc_poc(d_current, lookback_days_mid=lookback_days_mid, bins=10)
-    ema_rt = common_calculate_ema_derivatives(d, rt_price)
 
     close = d_current["close"]
     returns = close.pct_change().dropna()
@@ -439,28 +438,22 @@ def build_mid_term_trend(
     if mode == "FULL_90":
         summary = (
             f"近{base_used}日形态为{mid_features['shape']}，已融合实时价格，当前位于90日空间{mid_features['position_pct']}%，"
-            f"POC区间{poc['poc_range'][0]}-{poc['poc_range'][1]}（占比{poc['poc_ratio_pct']}%），"
-            f"量价综合标签{ema_rt.get('tag_combined', ema_rt.get('tag', '数据不足'))}。"
+            f"POC区间{poc['poc_range'][0]}-{poc['poc_range'][1]}（占比{poc['poc_ratio_pct']}%）。"
         )
     elif mode == "REDUCED_30_89":
         summary = (
             f"中期样本不足90日（实际{base_used}日），采用压缩版规则并融合实时价格。形态倾向{mid_features['shape']}，"
-            f"MACD交叉{macd_cross}次，波动状态{vol_state}，量价综合标签{ema_rt.get('tag_combined', ema_rt.get('tag', '数据不足'))}。"
+            f"MACD交叉{macd_cross}次，波动状态{vol_state}。"
         )
     else:
         summary = (
             f"可用历史仅{base_used}日（已融合实时价格），中期趋势样本不足，谨慎解读。"
-            f"量价综合标签{ema_rt.get('tag_combined', ema_rt.get('tag', '数据不足'))}。"
         )
 
     return {
         "mode": mode,
         "window_used": int(base_used),
         "summary": summary,
-        "shape": mid_features.get("shape", "数据不足"),
-        "position_pct": mid_features.get("position_pct", 0.0),
         "peaks": mid_features.get("peaks", []),
         "troughs": mid_features.get("troughs", []),
-        "poc_range": poc["poc_range"],
-        "poc_ratio_pct": poc["poc_ratio_pct"],
     }

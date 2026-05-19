@@ -111,12 +111,8 @@ class LLMAnalyst:
     - mode (数据完整度): {mid_trend.get('mode')}
     - window_used (实际可用天数): {mid_trend.get('window_used')}
     - summary (规则引擎总结): {mid_trend.get('summary')}
-    - shape (中期形态结构): {mid_trend.get('shape')}
-    - position_pct (当前价格处于90日高低点的百分位): {mid_trend.get('position_pct')}
     - peaks (近期波峰序列): {mid_trend.get('peaks')}
     - troughs (近期波谷序列): {mid_trend.get('troughs')}
-    - poc_range (90日主筹码峰区间): {mid_trend.get('poc_range')}
-    - poc_ratio_pct (90日主筹码峰占比): {mid_trend.get('poc_ratio_pct')}
 
     请按以下结构输出（Markdown）：
     1. 核心结论（先给方向，40-80字，必须含量化打分）
@@ -259,12 +255,8 @@ class LLMAnalyst:
     - mode (数据完整度): {mid_trend.get('mode')}
     - window_used (实际可用天数): {mid_trend.get('window_used')}
     - summary (规则引擎总结): {mid_trend.get('summary')}
-    - shape (中期形态结构): {mid_trend.get('shape')}
-    - position_pct (当前价格处于90日高低点的百分位): {mid_trend.get('position_pct')}
     - peaks (近期波峰序列): {mid_trend.get('peaks')}
     - troughs (近期波谷序列): {mid_trend.get('troughs')}
-    - poc_range (90日主筹码峰区间): {mid_trend.get('poc_range')}
-    - poc_ratio_pct (90日主筹码峰占比): {mid_trend.get('poc_ratio_pct')}
 
     请按以下结构输出（Markdown）：
     1. 核心结论（先给方向，40-80字，必须含量化打分）
