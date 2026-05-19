@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional
 
 import pandas as pd
@@ -12,6 +12,23 @@ from src.analysis.single_stock_math_calculate import (
     classify_mid_shape,
     extract_pivots,
 )
+
+
+def _nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> date:
+    first_day = date(year, month, 1)
+    offset = (weekday - first_day.weekday()) % 7
+    return first_day + timedelta(days=offset + (n - 1) * 7)
+
+
+def _fallback_us_eastern_tz(now_utc: datetime) -> timezone:
+    """US Eastern DST: second Sunday in March to first Sunday in November."""
+    year = now_utc.year
+    dst_start_day = _nth_weekday_of_month(year, 3, 6, 2)
+    dst_end_day = _nth_weekday_of_month(year, 11, 6, 1)
+    dst_start_utc = datetime(year, 3, dst_start_day.day, 7, 0, tzinfo=timezone.utc)
+    dst_end_utc = datetime(year, 11, dst_end_day.day, 6, 0, tzinfo=timezone.utc)
+    return timezone(timedelta(hours=-4 if dst_start_utc <= now_utc < dst_end_utc else -5))
+
 
 def _should_append_realtime_sample(
     d: pd.DataFrame,
@@ -49,19 +66,50 @@ def _parse_snapshot_date(value: Any) -> Optional[date]:
     return parsed.date()
 
 
+def _now_us_eastern(now_dt: Optional[datetime] = None) -> datetime:
+    """Return current US Eastern time; fall back conservatively if tzdata is unavailable."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        eastern = ZoneInfo("America/New_York")
+        if now_dt is not None and now_dt.tzinfo is not None:
+            return now_dt.astimezone(eastern)
+        if now_dt is not None:
+            return now_dt
+        return datetime.now(eastern)
+    except Exception:
+        if now_dt is not None and now_dt.tzinfo is not None:
+            now_utc = now_dt.astimezone(timezone.utc)
+            return now_utc.astimezone(_fallback_us_eastern_tz(now_utc))
+        if now_dt is not None:
+            return now_dt
+        now_utc = datetime.now(timezone.utc)
+        return now_utc.astimezone(_fallback_us_eastern_tz(now_utc))
+
+
 def _should_use_current_volume(stock_snapshot: Dict[str, Any], now_dt: Optional[datetime] = None) -> bool:
-    """Use same-day volume only after the HK session is close enough to complete."""
+    """Use same-day volume only when the current session is close enough to complete."""
     code = str(stock_snapshot.get("code") or stock_snapshot.get("symbol") or "").strip().upper()
-    if not code.startswith("HK."):
+    if code.startswith("HK."):
+        now_dt = now_dt or datetime.now()
+        if (now_dt.hour, now_dt.minute) < (15, 0):
+            return False
+
+        for key in ("update_time", "data_date", "last_trade_time"):
+            if _parse_snapshot_date(stock_snapshot.get(key)) == now_dt.date():
+                return True
         return False
 
-    now_dt = now_dt or datetime.now()
-    if (now_dt.hour, now_dt.minute) < (15, 0):
+    if code.startswith("US."):
+        us_now = _now_us_eastern(now_dt)
+        if (us_now.hour, us_now.minute) < (15, 0):
+            return False
+
+        for key in ("update_time", "data_date", "last_trade_time"):
+            if _parse_snapshot_date(stock_snapshot.get(key)) == us_now.date():
+                return True
         return False
 
-    for key in ("update_time", "data_date", "last_trade_time"):
-        if _parse_snapshot_date(stock_snapshot.get(key)) == now_dt.date():
-            return True
     return False
 
 

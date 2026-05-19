@@ -29,6 +29,7 @@ from src.analysis.single_stock_math_calculate import (
     _calculate_max_contiguous_up_pct as common_calculate_max_contiguous_up_pct,
 )
 from src.analysis.single_stock_feature_builder import (
+    _should_use_current_volume as common_should_use_current_volume,
     build_current_day_indicator as common_build_current_day_indicator,
     build_mid_trade_features as common_build_mid_trade_features,
     build_short_window_indicator as common_build_short_window_indicator,
@@ -58,6 +59,7 @@ build_short_window_indicator = common_build_short_window_indicator
 calculate_tag_today_by_derivatives = common_calculate_tag_today_by_derivatives
 empty_short_term_payload = common_empty_short_term_payload
 prepare_short_term_dataset = common_prepare_short_term_dataset
+should_use_current_volume = common_should_use_current_volume
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +157,57 @@ def calculate_us_capital_flow_profiles(
     max_window = max(windows) if windows else 90
     flow_df = futu_client.get_capital_flow_history(symbol, window_days=max(max_window, 90))
     return {w: _aggregate_us_capital_flow_from_df(flow_df, window_days=w) for w in windows}
+
+
+def get_today_capital_flow(symbol: str) -> Dict[str, str]:
+    """
+    Pull intraday US capital distribution and format today net flows.
+
+    Returns:
+        main_in_flow_today : 主力大单（超大单+大单）净流，正=净流入，负=净流出
+        total_in_flow_today: 全市场净流（主力 + 中单 + 小单）
+    """
+    from src.api.futu.client import futu_client
+
+    def _fmt_flow(val: float) -> str:
+        wan = val / 10_000
+        if abs(wan) >= 10_000:
+            return f"{round(wan / 10_000, 2)}亿"
+        return f"{round(wan, 2)}万"
+
+    try:
+        dist_df = futu_client.get_capital_flow(symbol)
+        if not isinstance(dist_df, pd.DataFrame) or dist_df.empty:
+            return {"main_in_flow_today": "无数据", "total_in_flow_today": "无数据"}
+
+        row = dist_df.iloc[0]
+
+        def _g(*cols: str) -> float:
+            for col in cols:
+                val = row.get(col)
+                if val is not None and not pd.isna(val):
+                    return float(val)
+            return 0.0
+
+        main_net = (
+            _g("capital_in_super") + _g("capital_in_big", "capital_in_large")
+        ) - (
+            _g("capital_out_super") + _g("capital_out_big", "capital_out_large")
+        )
+        retail_net = (
+            _g("capital_in_mid") + _g("capital_in_small")
+        ) - (
+            _g("capital_out_mid") + _g("capital_out_small")
+        )
+        total_net = main_net + retail_net
+
+        return {
+            "main_in_flow_today": _fmt_flow(main_net),
+            "total_in_flow_today": _fmt_flow(total_net),
+        }
+    except Exception as e:
+        logger.warning(f"[US/TodayFlow] Failed to fetch capital distribution for {symbol}: {e}")
+        return {"main_in_flow_today": "无数据", "total_in_flow_today": "无数据"}
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +395,8 @@ def build_us_fundamental_data(
       1. get_owner_plate  → plate_info
       2. get_market_snapshot → full snapshot (supplements base_snapshot)
       3. calculate_us_capital_flow_profiles → multi-window flow
-      4. us_basic_finance_data → formatted dict
+      4. get_today_capital_flow → intraday flow
+      5. us_basic_finance_data → formatted dict
     """
     from src.api.futu.client import futu_client
 
@@ -374,6 +428,7 @@ def build_us_fundamental_data(
         capital_flow_profiles=capital_flow_profiles,
     )
     fundamental_data["plate_info"] = plate_info
+    fundamental_data.update(get_today_capital_flow(symbol))
     return fundamental_data
 
 
@@ -420,7 +475,12 @@ def build_short_term_memory(
         return common_empty_short_term_payload(lookback_days_short, smart_net, retail_net)
 
     try:
-        prepared = common_prepare_short_term_dataset(klines_df, stock_snapshot, lookback_days_short)
+        prepared = common_prepare_short_term_dataset(
+            klines_df,
+            stock_snapshot,
+            lookback_days_short,
+            realtime_session_checker=common_should_use_current_volume,
+        )
     except ValueError:
         return common_empty_short_term_payload(lookback_days_short, smart_net, retail_net)
 
@@ -429,12 +489,17 @@ def build_short_term_memory(
     d_current = prepared["d_current"]
     last_n = prepared["last_n"]
     use_realtime_price = prepared.get("use_realtime_price", True)
+    current_volume = prepared.get("current_volume")
+    current_turnover = prepared.get("current_turnover")
 
-    latest_tag = common_calculate_tag_today_by_derivatives(
-        d_current=d_current,
-        current_price=current_price,
-        lookback_days_short=lookback_days_short,
+    _ema_history = d_current.iloc[:-1].copy().tail(max(20, lookback_days_short))
+    _ema_result = common_calculate_ema_derivatives(
+        _ema_history,
+        current_price,
+        current_volume=current_volume,
+        current_turnover=current_turnover,
     )
+    latest_tag = _ema_result.get("tag_combined", _ema_result.get("tag", "数据不足"))
     today = common_build_current_day_indicator(
         today_row=last_n.iloc[-1],
         stock_snapshot=stock_snapshot,

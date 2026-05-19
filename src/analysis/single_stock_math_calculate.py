@@ -18,17 +18,17 @@ def calculate_ema_derivatives(
 
     价格/趋势侧（实时）：EMA5/EMA20/V5/V20/A5/Bias20 均含盘中 current_price。
     成交量侧默认使用 T-1 锚；当调用方确认当日成交量已具备可比性
-        （例如港股 15:00 后或盘后）时，可传入 current_volume 参与量能判定。
+        （例如港股 15:00 后、美股 15:00 ET 后或盘后）时，可传入 current_volume/current_turnover。
 
     Returns:
         tag            : 价格趋势形态标签（6 种，不受成交量影响）
         tag_combined   : tag + volume_regime 二次研判（§3.3）；中性量能时等于 tag
         v5 / v20 / a5  : EMA 一阶/二阶导数（%）
         bias20         : 乖离率，仅观测，不参与标签决策
-        volume_regime  : 放量 / 中性 / 缩量（当前成交额 / 成交额EMA5）
-        volume_ratio_prev1d_5d  : V_current_or_prev1d / V_ema5
-        volume_ratio_prev1d_20d : 兼容字段，固定为 1.0
-        volume_ratio_5d_20d     : 兼容字段，固定为 1.0
+        volume_regime  : 放量 / 中性 / 缩量（双确认阈值，见文档 §2.5.3）
+        volume_ratio_prev1d_5d  : V_prev1d / V_avg5
+        volume_ratio_prev1d_20d : V_prev1d / V_avg20
+        volume_ratio_5d_20d     : V_avg5 / V_avg20
     """
     _empty = {
         "tag": "数据不足",
@@ -43,7 +43,7 @@ def calculate_ema_derivatives(
         logger.warning("Data too short or missing 'close' column for EMA derivatives calculation.")
         return _empty
 
-    # --- 成交量 regime（默认 T-1；可由调用方传入已具可比性的当日成交量）---
+    # --- 成交量 regime（默认 T-1 锚，必须在拼接 current_price 行之前计算）---
     volume_regime = "中性"
     r_prev1d_5d = 1.0
     r_prev1d_20d = 1.0
@@ -57,24 +57,36 @@ def calculate_ema_derivatives(
     ):
         if candidate in df.columns:
             series = pd.to_numeric(df[candidate], errors="coerce").dropna()
-            if len(series) >= 20:
+            if len(series) >= 6:
                 vol_col = candidate
-                current_vol_value = current_candidate
                 closed_vol = series
+                current_vol_value = current_candidate
                 break
 
     if vol_col is not None:
-        if len(closed_vol) >= 6:
-            current_volume_num = pd.to_numeric(pd.Series([current_vol_value]), errors="coerce").iloc[0]
-            use_current_volume = current_vol_value is not None and not pd.isna(current_volume_num) and float(current_volume_num) > 0
-            v_prev1d = float(current_volume_num) if use_current_volume else float(closed_vol.iloc[-1])
-            baseline_vol = closed_vol if use_current_volume else closed_vol.iloc[:-1]
+        current_volume_num = pd.to_numeric(pd.Series([current_vol_value]), errors="coerce").iloc[0]
+        use_current_volume = (
+            current_vol_value is not None
+            and not pd.isna(current_volume_num)
+            and float(current_volume_num) > 0
+        )
+        if use_current_volume:
+            v_prev1d = float(current_volume_num)
+            baseline_vol = closed_vol
+        else:
+            v_prev1d = float(closed_vol.iloc[-1])
+            baseline_vol = closed_vol.iloc[:-1] if len(closed_vol) > 6 else closed_vol
+
+        if len(baseline_vol) >= 5:
             v_ema5 = float(baseline_vol.ewm(span=5, adjust=False).mean().iloc[-1])
-            if v_ema5 > 0:
+            v_avg20 = float(baseline_vol.tail(min(20, len(baseline_vol))).mean())
+            if v_ema5 > 0 and v_avg20 > 0:
                 r_prev1d_5d = round(v_prev1d / v_ema5, 3)
-                if r_prev1d_5d >= 1.3:
+                r_prev1d_20d = round(v_prev1d / v_avg20, 3)
+                r_5d_20d = round(v_ema5 / v_avg20, 3)
+                if r_prev1d_20d >= 1.5 and r_prev1d_5d >= 1.3:
                     volume_regime = "放量"
-                elif r_prev1d_5d <= 0.7:
+                elif r_prev1d_20d <= 0.6 and r_prev1d_5d <= 0.7:
                     volume_regime = "缩量"
 
     # --- EMA 衍生指标（含当日实时价格）---
