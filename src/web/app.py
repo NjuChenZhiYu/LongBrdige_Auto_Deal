@@ -141,12 +141,11 @@ def scheduled_hk_report_job():
     asyncio.run(llm_analyst.generate_futu_hk_report(trigger_type='CRON'))
 
 def scheduled_log_cleanup():
-    """Wrapper for cleaning up old Futu logs"""
+    """Wrapper for cleaning up old project logs."""
     logger.info("Running scheduled log cleanup...")
     try:
-        from src.utils.log_cleaner import clean_futu_logs
-        # Keep logs for the last 3 days to prevent disk space issues
-        clean_futu_logs(days_to_keep=3)
+        from src.utils.log_cleaner import LOG_RETENTION_DAYS, clean_project_logs
+        clean_project_logs(days_to_keep=LOG_RETENTION_DAYS)
     except Exception as e:
         logger.error(f"Scheduled log cleanup failed: {e}")
 

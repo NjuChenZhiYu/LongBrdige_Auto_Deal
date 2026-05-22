@@ -97,6 +97,7 @@ class LLMAnalyst:
     - 当日快照:
       - date (日期): {today.get('date')}
       - rt_price (此刻价格): {today.get('rt_price')}
+      - change_rate (当日涨跌幅): {today.get('change_rate')}%
       - bias20 (乖离率，仅观测指标): {today.get('bias20')}%
       - tag_today (当日结构信号): {today.get('tag_today')}
     - 10日压缩画像:
@@ -241,6 +242,7 @@ class LLMAnalyst:
     - 当日快照:
       - date (日期): {today.get('date')}
       - rt_price (此刻价格): {today.get('rt_price')}
+      - change_rate (当日涨跌幅): {today.get('change_rate')}%
       - bias20 (乖离率): {today.get('bias20')}%
       - tag_today (当日结构信号): {today.get('tag_today')}
     - 10日压缩画像:

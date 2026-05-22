@@ -218,11 +218,18 @@ def build_current_day_indicator(
     safe_float = safe_float_fn or (lambda v, d=0.0: float(v) if v is not None else d)
     close_price = safe_float(today_row.get("close"), 0.0)
     rt_price = safe_float(stock_snapshot.get("last_price"), close_price) if use_realtime_price else close_price
+    row_change_rate = safe_float(today_row.get("change_rate"), 0.0)
+    change_rate = (
+        safe_float(stock_snapshot.get("change_rate"), row_change_rate)
+        if use_realtime_price
+        else row_change_rate
+    )
 
     return {
         "date": str(today_row.get(date_col, "")),
         "rt_price": round(rt_price, 3),
-        "bias20": round(safe_float(today_row.get("bias20")), 2),
+        "change_rate": round(change_rate, 2),
+        "bias20": round(safe_float(today_row.get("bias20"), 0.0), 2),
         "tag_today": latest_tag,
     }
 

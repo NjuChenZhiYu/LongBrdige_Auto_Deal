@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from config.settings import Settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,19 +27,19 @@ def calculate_ema_derivatives(
         tag_combined   : tag + volume_regime 二次研判（§3.3）；中性量能时等于 tag
         v5 / v20 / a5  : EMA 一阶/二阶导数（%）
         bias20         : 乖离率，仅观测，不参与标签决策
-        volume_regime  : 放量 / 中性 / 缩量（双确认阈值，见文档 §2.5.3）
-        volume_ratio_prev1d_5d  : V_prev1d / V_avg5
-        volume_ratio_prev1d_20d : V_prev1d / V_avg20
-        volume_ratio_5d_20d     : V_avg5 / V_avg20
+        volume_regime  : 放量 / 中性 / 缩量（双确认或短期极端阈值，见文档 §2.5.3）
+        volume_ratio_target_ema5  : V_target / V_ema5
+        volume_ratio_target_ema20 : V_target / V_ema20
+        volume_ratio_ema5_ema20   : V_ema5 / V_ema20
     """
     _empty = {
         "tag": "数据不足",
         "tag_combined": "数据不足",
         "v5": 0.0, "v20": 0.0, "a5": 0.0, "bias20": 0.0,
         "volume_regime": "中性",
-        "volume_ratio_prev1d_5d": 1.0,
-        "volume_ratio_prev1d_20d": 1.0,
-        "volume_ratio_5d_20d": 1.0,
+        "volume_ratio_target_ema5": 1.0,
+        "volume_ratio_target_ema20": 1.0,
+        "volume_ratio_ema5_ema20": 1.0,
     }
     if df is None or df.empty or "close" not in df.columns or len(df) < 20:
         logger.warning("Data too short or missing 'close' column for EMA derivatives calculation.")
@@ -45,18 +47,19 @@ def calculate_ema_derivatives(
 
     # --- 成交量 regime（默认 T-1 锚，必须在拼接 current_price 行之前计算）---
     volume_regime = "中性"
-    r_prev1d_5d = 1.0
-    r_prev1d_20d = 1.0
-    r_5d_20d = 1.0
+    r_target_ema5 = 1.0
+    r_target_ema20 = 1.0
+    r_ema5_ema20 = 1.0
     vol_col = None
     current_vol_value = None
+    closed_vol = pd.Series(dtype="float64")
     for candidate, current_candidate in (
         ("turnover", current_turnover),
         ("amount", current_turnover),
         ("volume", current_volume),
     ):
         if candidate in df.columns:
-            series = pd.to_numeric(df[candidate], errors="coerce").dropna()
+            series = pd.Series(pd.to_numeric(df[candidate], errors="coerce")).dropna()
             if len(series) >= 6:
                 vol_col = candidate
                 closed_vol = series
@@ -64,29 +67,51 @@ def calculate_ema_derivatives(
                 break
 
     if vol_col is not None:
-        current_volume_num = pd.to_numeric(pd.Series([current_vol_value]), errors="coerce").iloc[0]
+        current_volume_num = pd.Series(
+            pd.to_numeric(pd.Series([current_vol_value]), errors="coerce")
+        ).iloc[0]
         use_current_volume = (
             current_vol_value is not None
             and not pd.isna(current_volume_num)
             and float(current_volume_num) > 0
         )
         if use_current_volume:
-            v_prev1d = float(current_volume_num)
+            target_vol = float(current_volume_num)
             baseline_vol = closed_vol
         else:
-            v_prev1d = float(closed_vol.iloc[-1])
+            target_vol = float(closed_vol.iloc[-1])
             baseline_vol = closed_vol.iloc[:-1] if len(closed_vol) > 6 else closed_vol
 
         if len(baseline_vol) >= 5:
             v_ema5 = float(baseline_vol.ewm(span=5, adjust=False).mean().iloc[-1])
-            v_avg20 = float(baseline_vol.tail(min(20, len(baseline_vol))).mean())
-            if v_ema5 > 0 and v_avg20 > 0:
-                r_prev1d_5d = round(v_prev1d / v_ema5, 3)
-                r_prev1d_20d = round(v_prev1d / v_avg20, 3)
-                r_5d_20d = round(v_ema5 / v_avg20, 3)
-                if r_prev1d_20d >= 1.5 and r_prev1d_5d >= 1.3:
+            v_ema20 = float(baseline_vol.ewm(span=20, adjust=False).mean().iloc[-1])
+            if v_ema5 > 0 and v_ema20 > 0:
+                raw_r_target_ema5 = target_vol / v_ema5
+                raw_r_target_ema20 = target_vol / v_ema20
+                raw_r_ema5_ema20 = v_ema5 / v_ema20
+
+                r_target_ema5 = round(raw_r_target_ema5, 3)
+                r_target_ema20 = round(raw_r_target_ema20, 3)
+                r_ema5_ema20 = round(raw_r_ema5_ema20, 3)
+
+                is_expand_double_confirm = (
+                    raw_r_target_ema20 >= Settings.VOLUME_EXPAND_DOUBLE_EMA20_THRESHOLD
+                    and raw_r_target_ema5 >= Settings.VOLUME_EXPAND_DOUBLE_EMA5_THRESHOLD
+                )
+                is_shrink_double_confirm = (
+                    raw_r_target_ema20 <= Settings.VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD
+                    and raw_r_target_ema5 <= Settings.VOLUME_SHRINK_DOUBLE_EMA5_THRESHOLD
+                )
+                is_expand_short_extreme = (
+                    raw_r_target_ema5 >= Settings.VOLUME_EXPAND_SHORT_EMA5_THRESHOLD
+                )
+                is_shrink_short_extreme = (
+                    raw_r_target_ema5 <= Settings.VOLUME_SHRINK_SHORT_EMA5_THRESHOLD
+                )
+
+                if is_expand_double_confirm or is_expand_short_extreme:
                     volume_regime = "放量"
-                elif r_prev1d_20d <= 0.6 and r_prev1d_5d <= 0.7:
+                elif is_shrink_double_confirm or is_shrink_short_extreme:
                     volume_regime = "缩量"
 
     # --- EMA 衍生指标（含当日实时价格）---
@@ -152,9 +177,9 @@ def calculate_ema_derivatives(
         "a5": _sf(a5),
         "bias20": _sf(bias20),
         "volume_regime": volume_regime,
-        "volume_ratio_prev1d_5d": r_prev1d_5d,
-        "volume_ratio_prev1d_20d": r_prev1d_20d,
-        "volume_ratio_5d_20d": r_5d_20d,
+        "volume_ratio_target_ema5": r_target_ema5,
+        "volume_ratio_target_ema20": r_target_ema20,
+        "volume_ratio_ema5_ema20": r_ema5_ema20,
     }
 
 
