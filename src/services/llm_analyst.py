@@ -81,12 +81,13 @@ class LLMAnalyst:
     - 每股盈利(EPS)：{fundamental_data.get('earning_per_share', '无数据')}
     - 每股净资产(BPS)：{fundamental_data.get('net_asset_per_share', '无数据')}
     - PB：{fundamental_data.get('pb_ratio', '无数据')}
-
+    - 市盈率TTM：{fundamental_data.get('pe_ttm', '无数据')}
+    
     【筹码与流动性档案】
-    - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_5d', '无数据')}
-    - 近10日资金：主力大单净流入 {fundamental_data.get('main_in_flow_10d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_10d', '无数据')}
-    - 近90日资金：主力大单净流入 {fundamental_data.get('main_in_flow_90d', '无数据')}，整体净流 {fundamental_data.get('total_in_flow_90d', '无数据')}
-    - 当前盘口定性：{fundamental_data.get('flow_status_tag', '无数据')}
+    - 当日资金（实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
+    - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_5d', '无数据')}
+    - 近10日资金：主力大单净流入 {fundamental_data.get('main_in_flow_10d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_10d', '无数据')}
+    - 近90日资金：主力大单净流入 {fundamental_data.get('main_in_flow_90d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_90d', '无数据')}
 
     【短期记忆（近10日）】
     - window_used (实际可用天数): {short_memory.get('window_used')}
@@ -96,7 +97,8 @@ class LLMAnalyst:
     - 当日快照:
       - date (日期): {today.get('date')}
       - rt_price (此刻价格): {today.get('rt_price')}
-      - bias20 (乖离率): {today.get('bias20')}%
+      - change_rate (当日涨跌幅): {today.get('change_rate')}%
+      - bias20 (乖离率，仅观测指标): {today.get('bias20')}%
       - tag_today (当日结构信号): {today.get('tag_today')}
     - 10日压缩画像:
       - max_cum_up_10d_pct (10日累计最大涨幅): {summary_10d.get('max_cum_up_10d_pct')}%
@@ -110,12 +112,8 @@ class LLMAnalyst:
     - mode (数据完整度): {mid_trend.get('mode')}
     - window_used (实际可用天数): {mid_trend.get('window_used')}
     - summary (规则引擎总结): {mid_trend.get('summary')}
-    - shape (中期形态结构): {mid_trend.get('shape')}
-    - position_pct (当前价格处于90日高低点的百分位): {mid_trend.get('position_pct')}
     - peaks (近期波峰序列): {mid_trend.get('peaks')}
     - troughs (近期波谷序列): {mid_trend.get('troughs')}
-    - poc_range (90日主筹码峰区间): {mid_trend.get('poc_range')}
-    - poc_ratio_pct (90日主筹码峰占比): {mid_trend.get('poc_ratio_pct')}
 
     请按以下结构输出（Markdown）：
     1. 核心结论（先给方向，40-80字，必须含量化打分）
@@ -193,7 +191,237 @@ class LLMAnalyst:
                     
         return None
 
-    async def generate_single_stock_futu_report(
+    def _build_us_single_stock_prompt(
+        self,
+        symbol: str,
+        current_time: str,
+        fundamental_data: Dict[str, Any],
+        short_memory: Dict[str, Any],
+        mid_trend: Dict[str, Any],
+    ) -> str:
+        """Build US-market LLM prompt (Futu data source, tech-stock focused)."""
+        today = short_memory.get("today", {}) or {}
+        summary_10d = short_memory.get("summary_10d", {}) or {}
+        drawdown_raw = summary_10d.get("max_drawdown_10d_pct", 0.0)
+        try:
+            drawdown_10d_fmt = f"-{abs(float(drawdown_raw))}%"
+        except Exception:
+            drawdown_10d_fmt = "无数据"
+        return f"""你是美股量化深度分析师。请基于下面结构化数据生成单股研报。
+    【报告时间】
+    {current_time}
+
+    【标的】
+    {symbol}
+
+    【基本面与估值快照】
+    - 所属板块：{fundamental_data.get('plate_info', '无数据')}
+    - 总市值：{fundamental_data.get('total_market_val', '无数据')}
+    - 流通市值：{fundamental_data.get('circular_market_val', '无数据')}
+    - 总股本：{fundamental_data.get('issued_shares', '无数据')}
+    - 流通股本：{fundamental_data.get('outstanding_shares', '无数据')}
+    - 资产净值：{fundamental_data.get('net_asset', '无数据')}
+    - PB：{fundamental_data.get('pb_ratio', '无数据')}
+    - 52周高：{fundamental_data.get('highest_52w', '无数据')}
+    - 52周低：{fundamental_data.get('lowest_52w', '无数据')}
+
+    【夜盘行情（美股独有）】
+    - 夜盘价/涨跌幅：{fundamental_data.get('overnight_price', '无数据')} / {fundamental_data.get('overnight_change_rate', '无数据')}
+
+    【筹码与流动性档案】
+    - 当日资金（实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
+    - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_5d', '无数据')}
+    - 近10日资金：主力大单净流入 {fundamental_data.get('main_in_flow_10d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_10d', '无数据')}
+    - 近90日资金：主力大单净流入 {fundamental_data.get('main_in_flow_90d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_90d', '无数据')}
+
+    【短期记忆（近10日）】
+    - window_used (实际可用天数): {short_memory.get('window_used')}
+    - short_window_incomplete (是否不足10日): {short_memory.get('short_window_incomplete')}
+    - 主力净流(万): {short_memory.get('smart_net_wan')}
+    - 散户净流(万): {short_memory.get('retail_net_wan')}
+    - 当日快照:
+      - date (日期): {today.get('date')}
+      - rt_price (此刻价格): {today.get('rt_price')}
+      - change_rate (当日涨跌幅): {today.get('change_rate')}%
+      - bias20 (乖离率): {today.get('bias20')}%
+      - tag_today (当日结构信号): {today.get('tag_today')}
+    - 10日压缩画像:
+      - max_cum_up_10d_pct (10日累计最大涨幅): {summary_10d.get('max_cum_up_10d_pct')}%
+      - max_cum_drop_10d_pct (10日累计最大跌幅): {summary_10d.get('max_cum_drop_10d_pct')}%
+      - max_drawdown_10d_pct (10日最大回撤): {drawdown_10d_fmt}
+      - short_window_price_distribute (筹码集中区前三名): {summary_10d.get('short_window_price_distribute')}
+      - poc_range_10d (主峰价格区间): {summary_10d.get('poc_range_10d')}
+      - poc_ratio_10d_pct (主峰成交量占比): {summary_10d.get('poc_ratio_10d_pct')}%
+
+    【中期趋势（近90日）】
+    - mode (数据完整度): {mid_trend.get('mode')}
+    - window_used (实际可用天数): {mid_trend.get('window_used')}
+    - summary (规则引擎总结): {mid_trend.get('summary')}
+    - peaks (近期波峰序列): {mid_trend.get('peaks')}
+    - troughs (近期波谷序列): {mid_trend.get('troughs')}
+
+    请按以下结构输出（Markdown）：
+    1. 核心结论（先给方向，40-80字，必须含量化打分）
+       * 第一行固定格式：`【量化综合做多指数：评级(如★★★★☆) (X/100) - 一句话方向总结】`
+       * "-"右侧的"一句话方向总结"必填，不可省略；示例：`右侧爆发临界点，强烈买入`
+       * `X` 取值 0-100（整数）；`0-39=★`，`40-59=★★`，`60-74=★★★`，`75-89=★★★★`，`90-100=★★★★★`
+       * 第二行用 40-80 字给出方向结论，并解释该分数最关键的 1-2 个驱动因子；需与第一行方向保持一致。
+    2. 基本面与估值透视（中长期推演，250-300字）
+       * 严禁单纯罗列数据，必须穿透财务快照形成定价逻辑。
+       * 【买方三大公理映射】：审视标的契合哪几条底层公理。公理权重：1.行业潜力与增长度(40%，所在赛道是否处于高成长阶段、市场空间有多大，公司占市场份额大概有多少)；2.AI产业层级与关联度(40%，精准定位标的在AI产业链上下游传导的位置，算力基建Tier1/核心模型与强关联组件Tier2/深度赋能Tier3/边缘辅助应用Tier4，只有Tier1-3才能享受高赔率期权溢价)；3.物理世界运转效率跃升(20%，降本增效的直接受益者)。若不符合任何一条，直接给出"不予买入"结论；若同时满足1和2（双核驱动），给予极高溢价并大幅上调中长期评分。
+       * 重塑估值锚：轻资产科技股必须用 PS(市销率)评估，联网检索全球1-2家最可比美股公司 PS 做对标，明确给出"稀缺性溢价"或"严重低估"结论。
+       * 筹码与流动性：直接基于【筹码与流动性档案】中明确的短中长期"主力"与"整体"资金流向数据进行研判，结合【总/流通市值】定性真实的盘口博弈状态，无需主观猜测机构动向。
+    3. 技术面证据链（短期当日信号 + 10日风险收益 + 10日筹码分布 + 中期形态，200字左右）
+    4. 交易计划（入场条件、止损位、失效条件，100-150字）
+    5. 核心风险/证伪条件（除常规止损外，必须给出1条可导致逻辑瞬间崩塌的非结构化风险触发，如宏观事件/产业政策，40-80字）
+    6. 联网检索证据（固定三行）
+       * 检索时间：YYYY-MM-DD HH:MM（北京时间）
+       * 对标来源域名：至少3个，格式示例 finance.yahoo.com | companiesmarketcap.com | wsj.com
+       * 对标公司与PS时点：公司A(代码) PS=xx（时点）；公司B(代码) PS=yy（时点）
+
+    要求：
+    - 结论必须可交易，禁止空泛表述。
+    - 必须主动寻找"反面逻辑"，禁止只做线性外推（单边看多或单边看空）。
+    - 若样本不足（short_window_incomplete=true 或 mode!=FULL_90），必须显式提示不确定性。"""
+
+    @staticmethod
+    def _parse_us_symbol(symbol_input: str) -> Optional[str]:
+        """Normalize user input to Futu-native US.TICKER format.
+
+        Accepts: AAPL / AAPL.US / US.AAPL
+        """
+        raw = symbol_input.strip().upper()
+        if raw.startswith("US."):
+            return raw
+        if raw.endswith(".US"):
+            ticker, market = raw.rsplit(".", 1)
+            return f"{market}.{ticker}"
+        # bare ticker or hyphenated (e.g. BRK-B)
+        if raw.replace("-", "").replace(".", "").isalnum():
+            return f"US.{raw}"
+        return None
+
+    async def generate_us_single_stock_report(
+        self,
+        symbol_input: str,
+        trigger_type: str = "MANUAL",
+        lookback_days_short: int = 10,
+        lookback_days_mid: int = 90,
+        enable_grounded_search: bool = True,
+    ) -> Dict[str, Any]:
+        """Generate single-stock deep analysis report for US symbols (Futu data source).
+
+        Data pipeline:
+          1. _parse_us_symbol         → Futu-native US.TICKER format
+          2. get_special_quotes       → snapshot
+          3. get_capital_flow_history → capital_data (historical daily flow)
+          4. get_historical_klines    → klines_df
+          5. build_us_fundamental_data / build_short_term_memory / build_mid_term_trend
+          6. _build_us_single_stock_prompt → prompt
+          7. _call_llm_with_retry (Gemini grounded) → report_content
+        """
+        from src.api.futu.client import futu_client
+        from src.analysis.us_single_stock_indicator import (
+            build_us_fundamental_data,
+            build_short_term_memory,
+            build_mid_term_trend,
+        )
+
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        try:
+            futu_symbol = self._parse_us_symbol(symbol_input)
+            if not futu_symbol:
+                msg = "未匹配到有效美股代码（支持 AAPL / AAPL.US / US.AAPL）"
+                return {"ok": False, "symbol": symbol_input, "title": None, "report": None, "error": msg}
+
+            logger.info(
+                f"[Gemini/USSingleStock] start symbol_input={symbol_input}, parsed={futu_symbol}, trigger={trigger_type}"
+            )
+
+            snapshot_list = await asyncio.to_thread(futu_client.get_special_quotes, [futu_symbol])
+            if not snapshot_list:
+                msg = "未获取到股票快照数据，请确认代码或行情权限（需美股行情权限）。"
+                return {"ok": False, "symbol": futu_symbol, "title": None, "report": None, "error": msg}
+
+            stock = snapshot_list[0]
+            price = float(stock.get("last_price", 0.0))
+            stock_name = str(stock.get("name", "") or "").strip()
+            ticker = futu_symbol.split(".", 1)[1] if "." in futu_symbol else futu_symbol
+            standard_symbol = f"{ticker}.US"
+            symbol_for_prompt = f"{standard_symbol} {stock_name}" if stock_name else standard_symbol
+
+            capital_data = await asyncio.to_thread(
+                futu_client.get_capital_flow_history, futu_symbol, 90
+            )
+
+            klines_df = await asyncio.to_thread(
+                futu_client.get_historical_klines,
+                futu_symbol,
+                max(lookback_days_mid + 30, 120),
+            )
+            if klines_df is None or klines_df.empty:
+                msg = f"未获取到 {futu_symbol} 历史K线数据，无法生成短中期分析。"
+                logger.warning(f"[Gemini/USSingleStock] {msg}")
+                return {"ok": False, "symbol": futu_symbol, "title": None, "report": None, "error": msg}
+
+            short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
+            mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
+            fundamental_data = await asyncio.to_thread(
+                build_us_fundamental_data,
+                futu_symbol,
+                stock,
+                (5, 10, 90),
+            )
+
+            prompt = self._build_us_single_stock_prompt(
+                symbol_for_prompt,
+                current_time,
+                fundamental_data,
+                short_memory,
+                mid_trend,
+            )
+
+            report_content = await self._call_llm_with_retry(
+                prompt,
+                enable_grounded_search=enable_grounded_search,
+            )
+            if not report_content:
+                raise ValueError("LLM生成报告失败（3次重试后仍不满足完整性校验）")
+
+            full_report = f"""🦅 **Gemini 美股单股深度研报** | {standard_symbol} | {current_time}
+
+---
+
+{report_content}
+
+---
+
+📊 **数据窗口**：短期{lookback_days_short}天 | 中期{lookback_days_mid}天
+🔔 **触发类型**：{trigger_type}
+🧠 **AI模型**：{self.us_model}"""
+
+            title = f"[美股单股深度研报] {standard_symbol} ({current_time})"
+            alert_sent = await FeishuAlert.send_alert(title, full_report)
+            if alert_sent:
+                logger.info(f"[Gemini/USSingleStock] report sent to Feishu successfully: {standard_symbol}")
+            else:
+                logger.error(f"[Gemini/USSingleStock] report generated but Feishu send failed: {standard_symbol}")
+
+            return {
+                "ok": True,
+                "symbol": standard_symbol,
+                "title": title,
+                "report": full_report,
+                "error": None,
+            }
+        except Exception as e:
+            logger.error(f"[Gemini/USSingleStock] failed for {symbol_input}: {e}", exc_info=True)
+            error_title = f"[美股单股研报错误] {symbol_input} ({current_time})"
+            error_content = f"❌ 分析失败：{str(e)}"
+            await FeishuAlert.send_alert(error_title, error_content)
+            return {"ok": False, "symbol": symbol_input, "title": None, "report": None, "error": str(e)}
+
+    async def generate_hk_single_stock_report(
         self,
         symbol_input: str,
         trigger_type: str = "MANUAL",
@@ -227,24 +455,6 @@ class LLMAnalyst:
             stock_name = str(stock.get("name", "") or "").strip()
             symbol_for_prompt = f"{standard_symbol} {stock_name}" if stock_name else standard_symbol
             capital_data = await asyncio.to_thread(futu_client.get_capital_flow, standard_symbol)
-            
-            # Fetch plate info + full snapshot for fundamental fields.
-            full_snapshot = {}
-            plate_info = "无数据"
-            try:
-                quote_ctx = futu_client.get_quote_context()
-                ret_plate, plate_data = await asyncio.to_thread(quote_ctx.get_owner_plate, [standard_symbol])
-                if ret_plate == 0 and plate_data is not None and not plate_data.empty:
-                    valid_plates = plate_data[plate_data["plate_type"].isin(["INDUSTRY", "CONCEPT"])]
-                    if not valid_plates.empty:
-                        plate_info = "、".join(valid_plates["plate_name"].tolist())
-                # get_special_quotes returns a trimmed quote payload.
-                # Pull full market snapshot to enrich fundamentals.
-                ret_snap, snap_df = await asyncio.to_thread(quote_ctx.get_market_snapshot, [standard_symbol])
-                if ret_snap == 0 and snap_df is not None and not snap_df.empty:
-                    full_snapshot = snap_df.iloc[0].to_dict()
-            except Exception as e:
-                logger.warning(f"[Gemini/SingleStock] Failed to fetch plate/snapshot for {standard_symbol}: {e}")
                 
             klines_df = await asyncio.to_thread(
                 futu_client.get_hk_historical_klines,
@@ -259,22 +469,16 @@ class LLMAnalyst:
             from src.analysis.futu_math_indicator import (
                 build_short_term_memory,
                 build_mid_term_trend,
-                hk_basic_finance_data,
-                calculate_hk_capital_flow_profiles,
+                build_hk_fundamental_data,
             )
             short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
             mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
-            finance_snapshot = {**stock, **full_snapshot}
-            capital_flow_profiles = await asyncio.to_thread(
-                calculate_hk_capital_flow_profiles,
+            fundamental_data = await asyncio.to_thread(
+                build_hk_fundamental_data,
                 standard_symbol,
+                stock,
                 (5, 10, 90),
             )
-            fundamental_data = hk_basic_finance_data(
-                finance_snapshot,
-                capital_flow_profiles=capital_flow_profiles,
-            )
-            fundamental_data["plate_info"] = plate_info
             prompt = self._build_single_stock_prompt(
                 symbol_for_prompt,
                 current_time,
@@ -303,8 +507,11 @@ class LLMAnalyst:
 🧠 **AI模型**：{self.us_model}"""
 
             title = f"[单股深度研报] {standard_symbol} ({current_time})"
-            await FeishuAlert.send_alert(title, full_report)
-            logger.info(f"[Gemini/SingleStock] report sent successfully: {standard_symbol}")
+            alert_sent = await FeishuAlert.send_alert(title, full_report)
+            if alert_sent:
+                logger.info(f"[Gemini/SingleStock] report sent to Feishu successfully: {standard_symbol}")
+            else:
+                logger.error(f"[Gemini/SingleStock] report generated but Feishu send failed: {standard_symbol}")
 
             return {
                 "ok": True,
@@ -671,9 +878,9 @@ class LLMAnalyst:
                     if klines_df is not None and not klines_df.empty:
                         from src.analysis.futu_math_indicator import calculate_ema_derivatives
                         ema_data = calculate_ema_derivatives(klines_df, price)
-                        ema_tag = ema_data['tag']
-                        v5, a5, bias20 = ema_data['v5'], ema_data['a5'], ema_data['bias20']
-                        ema_text = f"   - 【量化技术面】：{ema_tag} (V5: {v5}%, A5: {a5}%, Bias20: {bias20}%)"
+                        ema_tag = ema_data.get('tag_combined', ema_data['tag'])
+                        v5, v20, a5, bias20 = ema_data['v5'], ema_data.get('v20', 0.0), ema_data['a5'], ema_data.get('bias20', 0.0)
+                        ema_text = f"   - 【量化技术面】：{ema_tag} (V5: {v5}%, V20: {v20}%, A5: {a5}%, Bias20: {bias20}%)"
                     else:
                         ema_text = f"   - 【量化技术面】：数据缺失"
                 except Exception as e:
@@ -780,8 +987,11 @@ class LLMAnalyst:
             
             # Send to Feishu
             title = f"[Gemini研报] 港股市场观察 ({current_time})"
-            await FeishuAlert.send_alert(title, full_report)
-            logger.info(f"[Gemini/Futu] Report sent to Feishu successfully")
+            alert_sent = await FeishuAlert.send_alert(title, full_report)
+            if alert_sent:
+                logger.info(f"[Gemini/Futu] Report sent to Feishu successfully")
+            else:
+                logger.error(f"[Gemini/Futu] Report generated but Feishu send failed")
                 
         except Exception as e:
             import traceback

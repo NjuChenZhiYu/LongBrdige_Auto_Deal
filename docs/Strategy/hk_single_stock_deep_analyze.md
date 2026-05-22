@@ -112,7 +112,7 @@ POST /api/v1/reports/futu/single-stock
 
 针对单个 symbol 按“先快照、后补全”的顺序拉取与校验：
 
-1. 实时与财务快照：价格、涨跌幅、昨收，以及基础估值（总市值、流通市值、PE、PE-TTM、PB、净利润）等（复用 `get_market_snapshot([symbol])` 方式）。
+1. 实时与财务快照：价格、涨跌幅、昨收，以及基础估值（总市值、流通市值、市盈率（静）`pe_ratio`、市盈率 TTM `pe_ttm_ratio`、PB、净利润等）（复用 `get_market_snapshot([symbol])` 方式，字段名以 `docs/Futu-API-Doc-zh-Python.md` 为准）。
 2. 历史 K 线：`get_hk_historical_klines(symbol, num_days)`，若为空则直接失败返回，不进入后续分析。
 3. 资金流：`get_capital_flow(symbol)`（允许为空并降级）。
 4. 历史 K 线窗口建议：
@@ -189,7 +189,7 @@ def _build_semantic_memory(klines_df, snapshot, capital_data) -> dict:
 完全采纳 `docs/Strategy/hk_basic_analyze.md` 当前策略：保留 Futu 的“标的自身快照 + 资金流”，废弃本地板块估值对比（`get_stock_filter` / `get_plate_stock`），行业对标改由 LLM 联网检索完成。
 
 当前实现基于以下数据源：
-- **标的快照**：`get_market_snapshot`（总/流通市值、总/流通股本、PB、PS、EPS、BPS、净资产等）。
+- **标的快照**：`get_market_snapshot`（总/流通市值、总/流通股本、PB、PS、EPS、BPS、净资产、**市盈率 TTM**（`pe_ttm_ratio` → 结构化字段 `pe_ttm`）、**市盈率（静）**（`pe_ratio` → 结构化字段 `pe_static`）等）。
 - **所属板块文本**：`get_owner_plate` 仅用于展示 `plate_info`（不参与行业估值计算）。
 - **资金流分层**：`get_capital_flow` + `calculate_hk_capital_flow(window=5/10/90)`，输出短中长三段主力/整体净流。
 - **行业相对估值**：通过 Prompt 中的“联网对标指令”由模型检索全球可比公司 PS，不再依赖本地板块中位数。
@@ -248,6 +248,8 @@ def _build_semantic_memory(klines_df, snapshot, capital_data) -> dict:
 总股本：{issued_shares}，流通股本：{outstanding_shares}
 资产净值：{net_asset}，每股盈利(EPS)：{earning_per_share}，每股净资产(BPS)：{net_asset_per_share}
 PB：{pb_ratio}
+市盈率TTM：{pe_ttm}
+市盈率（静）：{pe_static}
 
 【筹码与流动性档案】
 近5日资金：主力大单净流入 {main_in_flow_5d}，整体净流 {total_in_flow_5d}

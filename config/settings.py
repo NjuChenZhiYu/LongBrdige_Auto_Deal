@@ -97,6 +97,55 @@ class Settings:
     except ValueError:
         SPREAD_THRESHOLD = 0.05
 
+    # Volume regime thresholds
+    try:
+        VOLUME_EXPAND_DOUBLE_EMA5_THRESHOLD = float(_yaml_thresholds.get(
+            'volume_expand_double_ema5',
+            os.getenv("VOLUME_EXPAND_DOUBLE_EMA5_THRESHOLD", "1.3")
+        ))
+    except ValueError:
+        VOLUME_EXPAND_DOUBLE_EMA5_THRESHOLD = 1.3
+
+    try:
+        VOLUME_EXPAND_DOUBLE_EMA20_THRESHOLD = float(_yaml_thresholds.get(
+            'volume_expand_double_ema20',
+            os.getenv("VOLUME_EXPAND_DOUBLE_EMA20_THRESHOLD", "1.5")
+        ))
+    except ValueError:
+        VOLUME_EXPAND_DOUBLE_EMA20_THRESHOLD = 1.5
+
+    try:
+        VOLUME_SHRINK_DOUBLE_EMA5_THRESHOLD = float(_yaml_thresholds.get(
+            'volume_shrink_double_ema5',
+            os.getenv("VOLUME_SHRINK_DOUBLE_EMA5_THRESHOLD", "0.7")
+        ))
+    except ValueError:
+        VOLUME_SHRINK_DOUBLE_EMA5_THRESHOLD = 0.7
+
+    try:
+        VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD = float(_yaml_thresholds.get(
+            'volume_shrink_double_ema20',
+            os.getenv("VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD", "0.6")
+        ))
+    except ValueError:
+        VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD = 0.6
+
+    try:
+        VOLUME_EXPAND_SHORT_EMA5_THRESHOLD = float(_yaml_thresholds.get(
+            'volume_expand_short_ema5',
+            os.getenv("VOLUME_EXPAND_SHORT_EMA5_THRESHOLD", "1.5")
+        ))
+    except ValueError:
+        VOLUME_EXPAND_SHORT_EMA5_THRESHOLD = 1.5
+
+    try:
+        VOLUME_SHRINK_SHORT_EMA5_THRESHOLD = float(_yaml_thresholds.get(
+            'volume_shrink_short_ema5',
+            os.getenv("VOLUME_SHRINK_SHORT_EMA5_THRESHOLD", "0.6")
+        ))
+    except ValueError:
+        VOLUME_SHRINK_SHORT_EMA5_THRESHOLD = 0.6
+
     # Futu Configuration
     FUTU_HOST = os.getenv("FUTU_HOST", "127.0.0.1")
     FUTU_PORT = int(os.getenv("FUTU_PORT", "45575"))
