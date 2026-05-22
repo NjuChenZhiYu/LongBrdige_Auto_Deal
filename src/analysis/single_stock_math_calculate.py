@@ -10,6 +10,73 @@ from config.settings import Settings
 logger = logging.getLogger(__name__)
 
 
+def calculate_bollinger_bands(
+    df: pd.DataFrame,
+    current_price: float,
+    window: int = 20,
+    num_std: float = 2.0,
+) -> Dict[str, Any]:
+    """Calculate Bollinger Band levels and current price position with realtime price included."""
+    default = {
+        "bb_mid": 0.0,
+        "bb_upper": 0.0,
+        "bb_lower": 0.0,
+        "bb_pos": 0.0,
+        "bb_width": 0.0,
+        "bb_tag": "布林数据不足",
+    }
+    if df is None or df.empty or "close" not in df.columns or len(df) < window:
+        return default
+
+    close = pd.Series(pd.to_numeric(df["close"], errors="coerce"), dtype="float64").dropna()
+    if len(close) < window:
+        return default
+
+    current_price_num = _safe_float(current_price, 0.0)
+    if current_price_num <= 0:
+        current_price_num = float(close.iloc[-1])
+
+    close_calc = pd.concat(
+        [close.reset_index(drop=True), pd.Series([current_price_num], dtype="float64")],
+        ignore_index=True,
+    )
+    close_values = close_calc.to_numpy(dtype=float)
+    latest_window = close_values[-window:]
+    mid = float(np.mean(latest_window))
+    std = float(np.std(latest_window, ddof=0))
+    upper = mid + num_std * std
+    lower = mid - num_std * std
+    band_width = upper - lower
+
+    if not np.isfinite(mid) or not np.isfinite(upper) or not np.isfinite(lower) or band_width <= 0:
+        return default
+
+    bb_pos = (current_price_num - lower) / band_width
+    bb_width = band_width / mid * 100.0 if mid else 0.0
+
+    if bb_pos > 1:
+        bb_tag = "【布林上轨突破：短线强势/可能过热】"
+    elif bb_pos >= 0.8:
+        bb_tag = "【布林强势区：接近上轨】"
+    elif bb_pos >= 0.5:
+        bb_tag = "【布林中轨上方：修复转强】"
+    elif bb_pos >= 0.2:
+        bb_tag = "【布林中轨下方：弱势修复】"
+    elif bb_pos >= 0:
+        bb_tag = "【布林下轨附近：弱势/超跌观察】"
+    else:
+        bb_tag = "【跌破布林下轨：超跌或破位】"
+
+    return {
+        "bb_mid": round(mid, 2),
+        "bb_upper": round(upper, 2),
+        "bb_lower": round(lower, 2),
+        "bb_pos": round(float(bb_pos), 3),
+        "bb_width": round(float(bb_width), 2),
+        "bb_tag": bb_tag,
+    }
+
+
 def calculate_ema_derivatives(
     df: pd.DataFrame,
     current_price: float,
@@ -36,6 +103,7 @@ def calculate_ema_derivatives(
         "tag": "数据不足",
         "tag_combined": "数据不足",
         "v5": 0.0, "v20": 0.0, "a5": 0.0, "bias20": 0.0,
+        **calculate_bollinger_bands(df, current_price),
         "volume_regime": "中性",
         "volume_ratio_target_ema5": 1.0,
         "volume_ratio_target_ema20": 1.0,
@@ -124,6 +192,7 @@ def calculate_ema_derivatives(
     df_calc["V20"] = df_calc["EMA20"].pct_change() * 100
     df_calc["A5"] = df_calc["V5"].diff()
     df_calc["Bias20"] = (df_calc["close"] - df_calc["EMA20"]) / df_calc["EMA20"] * 100
+    bollinger = calculate_bollinger_bands(df, current_price)
 
     latest = df_calc.iloc[-1]
     v5 = latest["V5"]
@@ -176,6 +245,7 @@ def calculate_ema_derivatives(
         "v20": _sf(v20),
         "a5": _sf(a5),
         "bias20": _sf(bias20),
+        **bollinger,
         "volume_regime": volume_regime,
         "volume_ratio_target_ema5": r_target_ema5,
         "volume_ratio_target_ema20": r_target_ema20,

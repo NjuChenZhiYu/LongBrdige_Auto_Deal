@@ -208,6 +208,7 @@ def build_current_day_indicator(
     stock_snapshot: Dict[str, Any],
     date_col: str,
     latest_tag: str,
+    technical_result: Optional[Dict[str, Any]] = None,
     safe_float_fn: Optional[Callable[[Any, float], float]] = None,
     use_realtime_price: bool = True,
 ) -> Dict[str, Any]:
@@ -224,6 +225,14 @@ def build_current_day_indicator(
         if use_realtime_price
         else row_change_rate
     )
+    technical_result = technical_result or {}
+    bb_tag = str(technical_result.get("bb_tag", "布林数据不足"))
+    bb_pos = round(safe_float(technical_result.get("bb_pos"), 0.0), 3)
+    bb_mid = round(safe_float(technical_result.get("bb_mid"), 0.0), 2)
+    bb_upper = round(safe_float(technical_result.get("bb_upper"), 0.0), 2)
+    bb_lower = round(safe_float(technical_result.get("bb_lower"), 0.0), 2)
+    bb_width = round(safe_float(technical_result.get("bb_width"), 0.0), 2)
+    bb_summary = f"{bb_tag}，bb_pos={bb_pos}，轨道={bb_lower}/{bb_mid}/{bb_upper}，带宽={bb_width}%"
 
     return {
         "date": str(today_row.get(date_col, "")),
@@ -231,6 +240,13 @@ def build_current_day_indicator(
         "change_rate": round(change_rate, 2),
         "bias20": round(safe_float(today_row.get("bias20"), 0.0), 2),
         "tag_today": latest_tag,
+        "bb_summary": bb_summary,
+        "bb_tag": bb_tag,
+        "bb_pos": bb_pos,
+        "bb_mid": bb_mid,
+        "bb_upper": bb_upper,
+        "bb_lower": bb_lower,
+        "bb_width": bb_width,
     }
 
 
@@ -254,6 +270,13 @@ def empty_short_term_payload(lookback_days_short: int, smart_net: float, retail_
         "rt_price": 0.0,
         "bias20": 0.0,
         "tag_today": "数据不足",
+        "bb_summary": "布林数据不足",
+        "bb_tag": "布林数据不足",
+        "bb_pos": 0.0,
+        "bb_mid": 0.0,
+        "bb_upper": 0.0,
+        "bb_lower": 0.0,
+        "bb_width": 0.0,
     }
     summary_10d = {
         "max_cum_up_10d_pct": 0.0,

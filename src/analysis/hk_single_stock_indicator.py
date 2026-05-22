@@ -96,6 +96,7 @@ def build_short_term_memory(
         stock_snapshot=stock_snapshot,
         date_col=date_col,
         latest_tag=latest_tag,
+        technical_result=_ema_result,
         safe_float_fn=common_safe_float,
         use_realtime_price=use_realtime_price,
     )
