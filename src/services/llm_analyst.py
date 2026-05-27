@@ -48,6 +48,31 @@ class LLMAnalyst:
 今日期权异动数据:
 {signal_text}"""
 
+    @staticmethod
+    def _format_multi_window_trend_lines(mid_trend: Dict[str, Any]) -> str:
+        """Format multi-horizon trend snapshots for the LLM prompt."""
+        window_trends = mid_trend.get("window_trends") or []
+        if not window_trends:
+            window_trends = [{
+                "window_days": 90,
+                "summary": mid_trend.get("summary"),
+                "poc_range": mid_trend.get("poc_range", [0.0, 0.0]),
+                "poc_ratio_pct": mid_trend.get("poc_ratio_pct", 0.0),
+                "volatility_pct": mid_trend.get("volatility_pct", 0.0),
+                "peaks": mid_trend.get("peaks", []),
+                "troughs": mid_trend.get("troughs", []),
+            }]
+
+        return "\n".join(
+            (
+                f"    - {item.get('window_days')}日：{item.get('summary')} "
+                f"POC={item.get('poc_range')}，POC占比={item.get('poc_ratio_pct')}%，"
+                f"年化波动={item.get('volatility_pct')}%，"
+                f"波峰={item.get('peaks')}，波谷={item.get('troughs')}"
+            )
+            for item in window_trends
+        )
+
     def _build_single_stock_prompt(
         self,
         symbol: str,
@@ -64,6 +89,7 @@ class LLMAnalyst:
             drawdown_10d_fmt = f"-{abs(float(drawdown_raw))}%"
         except Exception:
             drawdown_10d_fmt = "无数据"
+        trend_lines = self._format_multi_window_trend_lines(mid_trend)
         return f"""你是港股量化深度分析师。请基于下面结构化数据生成单股研报。
     【报告时间】
     {current_time}
@@ -109,12 +135,8 @@ class LLMAnalyst:
       - poc_range_10d (主峰价格区间): {summary_10d.get('poc_range_10d')}
       - poc_ratio_10d_pct (主峰成交量占比): {summary_10d.get('poc_ratio_10d_pct')}%
 
-    【中期趋势（近90日）】
-    - mode (数据完整度): {mid_trend.get('mode')}
-    - window_used (实际可用天数): {mid_trend.get('window_used')}
-    - summary (规则引擎总结): {mid_trend.get('summary')}
-    - peaks (近期波峰序列): {mid_trend.get('peaks')}
-    - troughs (近期波谷序列): {mid_trend.get('troughs')}
+    【多周期趋势与位置】
+{trend_lines}
 
     请按以下结构输出（Markdown）：
     1. 核心结论（先给方向，40-80字，必须含量化打分）
@@ -127,8 +149,8 @@ class LLMAnalyst:
          * 【买方四大公理映射】：必须审视标的业务契合了以下哪几条底层公理，并据此定性资产属性（防御型现金奶牛 vs 进攻型高爆发成长）。公理存在权重差异：1.出海与全球化能力(40%，即中外剪刀差：成本RMB化，收益外汇化，这是硬科技公司活下去的首要条件)；2.AI产业层级与关联度(30%，精准定位标的在AI产业链上下游传导的位置，区分是算力基建Tier1/核心模型与强关联组件Tier2/深度赋能Tier3，还是仅仅作为辅助工具的边缘应用Tier4，只有Tier1-3才能享受高赔率期权溢价)；4.老龄化不可逆(20%)；3.物理世界运转效率跃升(10%)。若不符合任何一条，直接给出“不予买入”结论；若同时满足1和2（双核驱动），必须给予极高溢价并大幅上调中长期评分；满足其他组合则适度上调。
          * 重塑估值锚：对于轻资产科技股（18C等），严禁使用 BPS/PB 评估安全边际，必须使用 PS (市销率)；并通过联网检索全球1-2家最可比公司（优先美股）PS做对标，明确给出“稀缺性溢价”或“严重低估”结论。
          * 筹码与流动性：直接基于【筹码与流动性档案】中明确的短中长期“主力”与“整体”资金流向数据进行研判，结合【总/流通市值】定性真实的盘口博弈状态（如：主力托底散户抛售、主力出逃散户接盘等），无需主观猜测机构动向。
-    3. 技术面证据链（短期当日信号 + 布林轨位置 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 90日空间位置，200字左右）
-       * 必须解释 tag_today 的量价含义，并结合 bollinger_position、bias20、poc_range_10d、poc_ratio_10d_pct、90日空间位置判断该信号处于低位/中位/高位。
+    3. 技术面证据链（短期当日信号 + 布林轨位置 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 30/90/180日空间位置，200字左右）
+       * 必须解释 tag_today 的量价含义，并结合 bollinger_position、bias20、poc_range_10d、poc_ratio_10d_pct、30/90/180日空间位置判断该信号处于低位/中位/高位，说明多周期是否共振。
        * 若 tag_today 含"缩量/放量"，必须说明其更接近低位承接、分歧换手还是高位派发风险，并给出明确操作评分：看多 1-5、看空 1-5，以及对应的仓位动作。
      4. 交易计划（入场条件、止损位、失效条件，100-150字）
     5. 核心风险/证伪条件（除常规止损外，必须给出1条可导致逻辑瞬间崩塌的非结构化风险触发，如宏观事件/产业政策，40-80字）
@@ -140,7 +162,7 @@ class LLMAnalyst:
     要求：
     - 结论必须可交易，禁止空泛表述。
     - 必须主动寻找“反面逻辑”，禁止只做线性外推（单边看多或单边看空）。
-    - 若样本不足（short_window_incomplete=true 或 mode!=FULL_90），必须显式提示不确定性。"""
+    - 若样本不足（short_window_incomplete=true 或多周期趋势中任一关键窗口实际样本少于目标窗口），必须显式提示不确定性。"""
 
     async def _call_llm_with_retry(
         self,
@@ -210,6 +232,7 @@ class LLMAnalyst:
             drawdown_10d_fmt = f"-{abs(float(drawdown_raw))}%"
         except Exception:
             drawdown_10d_fmt = "无数据"
+        trend_lines = self._format_multi_window_trend_lines(mid_trend)
         return f"""你是美股量化深度分析师。请基于下面结构化数据生成单股研报。
     【报告时间】
     {current_time}
@@ -257,12 +280,8 @@ class LLMAnalyst:
       - poc_range_10d (主峰价格区间): {summary_10d.get('poc_range_10d')}
       - poc_ratio_10d_pct (主峰成交量占比): {summary_10d.get('poc_ratio_10d_pct')}%
 
-    【中期趋势（近90日）】
-    - mode (数据完整度): {mid_trend.get('mode')}
-    - window_used (实际可用天数): {mid_trend.get('window_used')}
-    - summary (规则引擎总结): {mid_trend.get('summary')}
-    - peaks (近期波峰序列): {mid_trend.get('peaks')}
-    - troughs (近期波谷序列): {mid_trend.get('troughs')}
+    【多周期趋势与位置】
+{trend_lines}
 
     请按以下结构输出（Markdown）：
     1. 核心结论（先给方向，40-80字，必须含量化打分）
@@ -275,8 +294,8 @@ class LLMAnalyst:
        * 【买方三大公理映射】：审视标的契合哪几条底层公理。公理权重：1.行业潜力与增长度(40%，所在赛道是否处于高成长阶段、市场空间有多大，公司占市场份额大概有多少)；2.AI产业层级与关联度(40%，精准定位标的在AI产业链上下游传导的位置，算力基建Tier1/核心模型与强关联组件Tier2/深度赋能Tier3/边缘辅助应用Tier4，只有Tier1-3才能享受高赔率期权溢价)；3.物理世界运转效率跃升(20%，降本增效的直接受益者)。若不符合任何一条，直接给出"不予买入"结论；若同时满足1和2（双核驱动），给予极高溢价并大幅上调中长期评分。
        * 重塑估值锚：轻资产科技股必须用 PS(市销率)评估，联网检索全球1-2家最可比美股公司 PS 做对标，明确给出"稀缺性溢价"或"严重低估"结论。
        * 筹码与流动性：直接基于【筹码与流动性档案】中明确的短中长期"主力"与"整体"资金流向数据进行研判，结合【总/流通市值】定性真实的盘口博弈状态，无需主观猜测机构动向。
-    3. 技术面证据链（短期当日信号 + 布林轨位置 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 90日空间位置，200字左右）
-       * 必须解释 tag_today 的量价含义，并结合 bollinger_position、bias20、poc_range_10d、poc_ratio_10d_pct、90日空间位置判断该信号处于低位/中位/高位。
+    3. 技术面证据链（短期当日信号 + 布林轨位置 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 30/90/180日空间位置，200字左右）
+       * 必须解释 tag_today 的量价含义，并结合 bollinger_position、bias20、poc_range_10d、poc_ratio_10d_pct、30/90/180日空间位置判断该信号处于低位/中位/高位，说明多周期是否共振。
        * 若 tag_today 含“缩量/放量”，必须说明其更接近低位承接、分歧换手还是高位派发风险，并给出明确操作评分：看多 1-5、看空 1-5，以及对应的仓位动作。
     4. 交易计划（入场条件、止损位、失效条件，100-150字）
     5. 核心风险/证伪条件（除常规止损外，必须给出1条可导致逻辑瞬间崩塌的非结构化风险触发，如宏观事件/产业政策，40-80字）
@@ -288,7 +307,7 @@ class LLMAnalyst:
     要求：
     - 结论必须可交易，禁止空泛表述。
     - 必须主动寻找"反面逻辑"，禁止只做线性外推（单边看多或单边看空）。
-    - 若样本不足（short_window_incomplete=true 或 mode!=FULL_90），必须显式提示不确定性。"""
+    - 若样本不足（short_window_incomplete=true 或多周期趋势中任一关键窗口实际样本少于目标窗口），必须显式提示不确定性。"""
 
     @staticmethod
     def _parse_us_symbol(symbol_input: str) -> Optional[str]:
@@ -363,10 +382,10 @@ class LLMAnalyst:
             klines_df = await asyncio.to_thread(
                 futu_client.get_historical_klines,
                 futu_symbol,
-                max(lookback_days_mid + 30, 120),
+                max(lookback_days_mid + 60, 240),
             )
             if klines_df is None or klines_df.empty:
-                msg = f"未获取到 {futu_symbol} 历史K线数据，无法生成短中期分析。"
+                msg = f"未获取到 {futu_symbol} 历史K线数据，无法生成短期与多周期分析。"
                 logger.warning(f"[Gemini/USSingleStock] {msg}")
                 return {"ok": False, "symbol": futu_symbol, "title": None, "report": None, "error": msg}
 
@@ -402,7 +421,7 @@ class LLMAnalyst:
 
 ---
 
-📊 **数据窗口**：短期{lookback_days_short}天 | 中期{lookback_days_mid}天
+📊 **数据窗口**：短期{lookback_days_short}天 | 多周期30/90/180天
 🔔 **触发类型**：{trigger_type}
 🧠 **AI模型**：{self.us_model}"""
 
@@ -465,10 +484,10 @@ class LLMAnalyst:
             klines_df = await asyncio.to_thread(
                 futu_client.get_hk_historical_klines,
                 standard_symbol,
-                max(lookback_days_mid + 30, 120),
+                max(lookback_days_mid + 60, 240),
             )
             if klines_df is None or klines_df.empty:
-                msg = f"未获取到 {standard_symbol} 历史K线数据，无法生成短中期分析。"
+                msg = f"未获取到 {standard_symbol} 历史K线数据，无法生成短期与多周期分析。"
                 logger.warning(f"[Gemini/SingleStock] {msg}")
                 return {"ok": False, "symbol": standard_symbol, "title": None, "report": None, "error": msg}
 
@@ -508,7 +527,7 @@ class LLMAnalyst:
 
 ---
 
-📊 **数据窗口**：短期{lookback_days_short}天 | 中期{lookback_days_mid}天
+📊 **数据窗口**：短期{lookback_days_short}天 | 多周期30/90/180天
 🔔 **触发类型**：{trigger_type}
 🧠 **AI模型**：{self.us_model}"""
 

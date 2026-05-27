@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 from typing import Optional, Dict, List, Any
 import logging
 from src.analysis.single_stock_math_calculate import (
@@ -18,6 +17,7 @@ from src.analysis.single_stock_feature_builder import (
     calculate_tag_today_by_derivatives as common_calculate_tag_today_by_derivatives,
     build_current_day_indicator as common_build_current_day_indicator,
     empty_short_term_payload as common_empty_short_term_payload,
+    build_multi_window_trends as common_build_multi_window_trends,
     build_mid_trade_features as common_build_mid_trade_features,
     prepare_short_term_dataset as common_prepare_short_term_dataset,
     build_short_window_indicator as common_build_short_window_indicator,
@@ -371,90 +371,23 @@ def build_mid_term_trend(
     current_price: float,
     lookback_days_mid: int = 90
 ) -> Dict[str, Any]:
-    """Build shape-first mid-term trend summary with sample-size fallback."""
-    default = {
-        "mode": "INSUFFICIENT_LT30",
-        "window_used": 0,
-        "summary": "趋势样本不足，仅可参考实时快照。",
-        "shape": "数据不足",
-        "position_pct": 0.0,
-        "peaks": [],
-        "troughs": [],
-        "poc_range": [0.0, 0.0],
-        "poc_ratio_pct": 0.0,
-    }
-    if klines_df is None or klines_df.empty:
-        return default
-
-    d = klines_df.copy()
-    if "time_key" in d.columns:
-        d = d.sort_values("time_key")
-    for col in ("close", "high", "low"):
-        if col in d.columns:
-            d[col] = pd.to_numeric(d[col], errors="coerce")
-    d = d.dropna(subset=["close"])
-    if d.empty:
-        return default
-
-    d = d.tail(min(lookback_days_mid, len(d))).copy()
-    if d.empty:
-        return default
-
-    # 融合实时价格到中期窗口末端，用于更新形态位置与波动判断。
-    d_current = d.copy()
-    latest_row = d_current.iloc[-1].copy()
-    rt_price = float(current_price) if current_price and current_price > 0 else float(d_current["close"].iloc[-1])
-    latest_row["close"] = rt_price
-    if "high" in d_current.columns:
-        latest_row["high"] = max(float(latest_row.get("high", rt_price)), rt_price)
-    if "low" in d_current.columns:
-        latest_row["low"] = min(float(latest_row.get("low", rt_price)), rt_price)
-    if "time_key" in d_current.columns:
-        latest_row["time_key"] = common_format_rt_time_label(latest_row.get("time_key"))
-    d_current.loc[len(d_current)] = latest_row
-
-    used = len(d_current)
-    mid_features = common_build_mid_trade_features(d_current, lookback_days_mid=lookback_days_mid)
-    poc = common_calc_poc(d_current, lookback_days_mid=lookback_days_mid, bins=10)
-
-    close = d_current["close"]
-    returns = close.pct_change().dropna()
-    vol_pct = float(returns.std() * np.sqrt(252) * 100.0) if not returns.empty else 0.0
-    if vol_pct >= 45:
-        vol_state = "高波动"
-    elif vol_pct >= 25:
-        vol_state = "中波动"
-    else:
-        vol_state = "低波动/压缩"
-
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    dif = ema12 - ema26
-    dea = dif.ewm(span=9, adjust=False).mean()
-    sign = np.sign((dif - dea).fillna(0.0).to_numpy())
-    macd_cross = int(np.sum(sign[1:] * sign[:-1] < 0)) if len(sign) > 1 else 0
-
-    base_used = len(d)
-    mode = "FULL_90" if base_used >= lookback_days_mid else ("REDUCED_30_89" if base_used >= 30 else "INSUFFICIENT_LT30")
-    if mode == "FULL_90":
-        summary = (
-            f"近{base_used}日形态为{mid_features['shape']}，已融合实时价格，当前位于90日空间{mid_features['position_pct']}%，"
-            f"POC区间{poc['poc_range'][0]}-{poc['poc_range'][1]}（占比{poc['poc_ratio_pct']}%）。"
-        )
-    elif mode == "REDUCED_30_89":
-        summary = (
-            f"中期样本不足90日（实际{base_used}日），采用压缩版规则并融合实时价格。形态倾向{mid_features['shape']}，"
-            f"MACD交叉{macd_cross}次，波动状态{vol_state}。"
-        )
-    else:
-        summary = (
-            f"可用历史仅{base_used}日（已融合实时价格），中期趋势样本不足，谨慎解读。"
-        )
-
+    """Build multi-window trend summary while preserving the legacy 90-day keys."""
+    windows = (30, lookback_days_mid, 180)
+    window_trends = common_build_multi_window_trends(klines_df, current_price, windows=windows)
+    primary = next(
+        (item for item in window_trends if item.get("window_days") == int(lookback_days_mid)),
+        window_trends[0] if window_trends else {},
+    )
     return {
-        "mode": mode,
-        "window_used": int(base_used),
-        "summary": summary,
-        "peaks": mid_features.get("peaks", []),
-        "troughs": mid_features.get("troughs", []),
+        "mode": primary.get("mode", "INSUFFICIENT"),
+        "window_used": primary.get("window_used", 0),
+        "summary": primary.get("summary", "趋势样本不足，仅可参考实时快照。"),
+        "shape": primary.get("shape", "数据不足"),
+        "position_pct": primary.get("position_pct", 0.0),
+        "peaks": primary.get("peaks", []),
+        "troughs": primary.get("troughs", []),
+        "poc_range": primary.get("poc_range", [0.0, 0.0]),
+        "poc_ratio_pct": primary.get("poc_ratio_pct", 0.0),
+        "volatility_pct": primary.get("volatility_pct", 0.0),
+        "window_trends": window_trends,
     }

@@ -19,7 +19,9 @@ from src.analysis.single_stock_math_calculate import (
 )
 from src.analysis.single_stock_feature_builder import (
     build_current_day_indicator,
+    build_multi_window_trends,
     build_mid_trade_features,
+    build_window_trend,
     build_short_window_indicator,
     calculate_tag_today_by_derivatives,
     empty_short_term_payload,
@@ -66,7 +68,9 @@ __all__ = [
     "_format_rt_time_label",
     "_safe_float",
     "build_current_day_indicator",
+    "build_multi_window_trends",
     "build_mid_trade_features",
+    "build_window_trend",
     "build_short_window_indicator",
     "calc_poc",
     "calculate_bollinger_bands",

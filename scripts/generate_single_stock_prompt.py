@@ -47,7 +47,7 @@ def generate_prompt_file(
 
     klines_df = futu_client.get_hk_historical_klines(
         standard_symbol,
-        max(lookback_days_mid + 30, 120),
+        max(lookback_days_mid + 60, 240),
     )
     if klines_df is None or klines_df.empty:
         raise RuntimeError(f"未获取到 {standard_symbol} 历史K线数据，无法生成 prompt。")
@@ -89,7 +89,7 @@ def main() -> None:
         help="输出目录（默认: tmp/stock_promt_storage）",
     )
     parser.add_argument("--short", type=int, default=10, help="短期窗口天数，默认 10")
-    parser.add_argument("--mid", type=int, default=90, help="中期窗口天数，默认 90")
+    parser.add_argument("--mid", type=int, default=90, help="多周期核心窗口天数，默认 90")
     args = parser.parse_args()
 
     try:

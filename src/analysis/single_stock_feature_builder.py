@@ -1,5 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import pandas as pd
 
@@ -8,6 +8,7 @@ from src.analysis.single_stock_math_calculate import (
     _format_rt_time_label as common_format_rt_time_label,
     _safe_float as common_safe_float,
     _calculate_risk_metrics,
+    calc_poc,
     calculate_ema_derivatives as common_calculate_ema_derivatives,
     classify_mid_shape,
     extract_pivots,
@@ -201,6 +202,136 @@ def build_mid_trade_features(df: pd.DataFrame, lookback_days_mid: int = 90) -> D
         "peaks": [round(float(v), 2) for v in peaks],
         "troughs": [round(float(v), 2) for v in troughs],
     }
+
+
+def _prepare_trend_window_df(
+    klines_df: pd.DataFrame,
+    current_price: float,
+    window_days: int,
+) -> pd.DataFrame:
+    d = klines_df.copy()
+    date_col = "time_key" if "time_key" in d.columns else ("date" if "date" in d.columns else None)
+    if date_col:
+        d = d.sort_values(date_col)
+    for col in ("open", "close", "high", "low", "volume", "turnover", "amount", "vwap"):
+        if col in d.columns:
+            d[col] = pd.to_numeric(d[col], errors="coerce")
+    d = d.dropna(subset=["close"]).tail(min(max(window_days - 1, 1), len(d))).copy()
+    if d.empty:
+        return d
+
+    rt_price = common_safe_float(current_price, common_safe_float(d["close"].iloc[-1]))
+    if rt_price <= 0:
+        rt_price = common_safe_float(d["close"].iloc[-1])
+
+    latest_row = d.iloc[-1].copy()
+    latest_row["close"] = rt_price
+    if "high" in d.columns:
+        latest_row["high"] = max(common_safe_float(latest_row.get("high"), rt_price), rt_price)
+    if "low" in d.columns:
+        latest_row["low"] = min(common_safe_float(latest_row.get("low"), rt_price), rt_price)
+    if date_col:
+        latest_row[date_col] = common_format_rt_time_label(latest_row.get(date_col))
+    d.loc[len(d)] = latest_row
+    return d.reset_index(drop=True)
+
+
+def _max_drawdown_pct(close: pd.Series) -> float:
+    if close.empty:
+        return 0.0
+    running_high = close.cummax()
+    drawdown = close / running_high - 1.0
+    return round(float(drawdown.min() * 100.0), 2)
+
+
+def build_window_trend(
+    klines_df: Optional[pd.DataFrame],
+    current_price: float,
+    window_days: int,
+) -> Dict[str, Any]:
+    """Build a single trend window with realtime price fused into the last sample."""
+    default = {
+        "window_days": int(window_days),
+        "window_used": 0,
+        "mode": "INSUFFICIENT",
+        "summary": "样本不足，无法形成稳定趋势判断。",
+        "shape": "数据不足",
+        "position_pct": 0.0,
+        "return_pct": 0.0,
+        "max_drawdown_pct": 0.0,
+        "volatility_pct": 0.0,
+        "poc_range": [0.0, 0.0],
+        "poc_ratio_pct": 0.0,
+        "peaks": [],
+        "troughs": [],
+    }
+    if klines_df is None or klines_df.empty:
+        return default
+
+    d = _prepare_trend_window_df(klines_df, current_price, window_days)
+    if d.empty:
+        return default
+
+    close = pd.to_numeric(d["close"], errors="coerce").dropna()
+    if close.empty:
+        return default
+
+    features = build_mid_trade_features(d, lookback_days_mid=window_days)
+    poc = calc_poc(d, lookback_days_mid=window_days, bins=10)
+    returns = close.pct_change().dropna()
+    volatility_pct = float(returns.std() * (252 ** 0.5) * 100.0) if not returns.empty else 0.0
+    return_pct = (float(close.iloc[-1]) / float(close.iloc[0]) - 1.0) * 100.0 if close.iloc[0] else 0.0
+    max_drawdown = _max_drawdown_pct(close)
+
+    if len(close) >= window_days:
+        mode = f"FULL_{window_days}"
+    elif len(close) >= max(20, window_days // 2):
+        mode = f"REDUCED_{len(close)}"
+    else:
+        mode = "INSUFFICIENT"
+
+    ma20 = close.rolling(20).mean().iloc[-1] if len(close) >= 20 else None
+    ma60 = close.rolling(60).mean().iloc[-1] if len(close) >= 60 else None
+    ma_state = "均线样本不足"
+    if ma20 is not None and not pd.isna(ma20):
+        ma_state = "站上20日均线" if close.iloc[-1] >= ma20 else "跌破20日均线"
+    if ma60 is not None and not pd.isna(ma60):
+        ma_state += "，且在60日均线上方" if close.iloc[-1] >= ma60 else "，且在60日均线下方"
+
+    summary = (
+        f"近{window_days}日实际样本{len(close)}日，形态为{features.get('shape', '数据不足')}，"
+        f"区间涨跌{round(return_pct, 2)}%，最大回撤{max_drawdown}%，"
+        f"当前位置位于区间{features.get('position_pct', 0.0)}%，{ma_state}。"
+    )
+
+    return {
+        "window_days": int(window_days),
+        "window_used": int(len(close)),
+        "mode": mode,
+        "summary": summary,
+        "shape": features.get("shape", "数据不足"),
+        "position_pct": features.get("position_pct", 0.0),
+        "return_pct": round(return_pct, 2),
+        "max_drawdown_pct": max_drawdown,
+        "volatility_pct": round(volatility_pct, 2),
+        "poc_range": poc.get("poc_range", [0.0, 0.0]),
+        "poc_ratio_pct": poc.get("poc_ratio_pct", 0.0),
+        "peaks": features.get("peaks", []),
+        "troughs": features.get("troughs", []),
+    }
+
+
+def build_multi_window_trends(
+    klines_df: Optional[pd.DataFrame],
+    current_price: float,
+    windows: Sequence[int] = (30, 90, 180),
+) -> List[Dict[str, Any]]:
+    """Build stock trend snapshots across multiple horizons for prompt consumption."""
+    normalized_windows = sorted({max(1, int(window)) for window in windows})
+    return [
+        build_window_trend(klines_df, current_price, window_days)
+        for window_days in normalized_windows
+    ]
 
 
 def build_current_day_indicator(
