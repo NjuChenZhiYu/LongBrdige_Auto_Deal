@@ -59,8 +59,8 @@ class LLMAnalyst:
                 "poc_range": mid_trend.get("poc_range", [0.0, 0.0]),
                 "poc_ratio_pct": mid_trend.get("poc_ratio_pct", 0.0),
                 "volatility_pct": mid_trend.get("volatility_pct", 0.0),
-                "peaks": mid_trend.get("peaks", []),
-                "troughs": mid_trend.get("troughs", []),
+                "top_highs": mid_trend.get("top_highs", []),
+                "bottom_lows": mid_trend.get("bottom_lows", []),
             }]
 
         return "\n".join(
@@ -68,7 +68,8 @@ class LLMAnalyst:
                 f"    - {item.get('window_days')}日：{item.get('summary')} "
                 f"POC={item.get('poc_range')}，POC占比={item.get('poc_ratio_pct')}%，"
                 f"年化波动={item.get('volatility_pct')}%，"
-                f"波峰={item.get('peaks')}，波谷={item.get('troughs')}"
+                f"窗口Top3高点={item.get('top_highs', [])}，"
+                f"窗口Top3低点={item.get('bottom_lows', [])}"
             )
             for item in window_trends
         )

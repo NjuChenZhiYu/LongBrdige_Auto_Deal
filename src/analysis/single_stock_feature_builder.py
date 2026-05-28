@@ -166,6 +166,10 @@ def build_mid_trade_features(df: pd.DataFrame, lookback_days_mid: int = 90) -> D
         return {
             "shape": "数据不足",
             "position_pct": 0.0,
+            "window_high": 0.0,
+            "window_low": 0.0,
+            "top_highs": [],
+            "bottom_lows": [],
             "peaks": [],
             "troughs": [],
         }
@@ -177,6 +181,10 @@ def build_mid_trade_features(df: pd.DataFrame, lookback_days_mid: int = 90) -> D
         return {
             "shape": "数据不足",
             "position_pct": 0.0,
+            "window_high": 0.0,
+            "window_low": 0.0,
+            "top_highs": [],
+            "bottom_lows": [],
             "peaks": [],
             "troughs": [],
         }
@@ -187,8 +195,8 @@ def build_mid_trade_features(df: pd.DataFrame, lookback_days_mid: int = 90) -> D
 
     high_series = d["high"] if "high" in d.columns else d["close"]
     low_series = d["low"] if "low" in d.columns else d["close"]
-    high_n = float(high_series.max())
-    low_n = float(low_series.min())
+    high_n = common_safe_float(high_series.max())
+    low_n = common_safe_float(low_series.min())
     current_price = float(d["close"].iloc[-1])
     position_pct = 50.0 if high_n <= low_n else ((current_price - low_n) / (high_n - low_n) * 100.0)
     position_pct = max(0.0, min(100.0, position_pct))
@@ -199,9 +207,56 @@ def build_mid_trade_features(df: pd.DataFrame, lookback_days_mid: int = 90) -> D
     return {
         "shape": shape,
         "position_pct": round(position_pct, 2),
+        "window_high": round(high_n, 2),
+        "window_low": round(low_n, 2),
+        "top_highs": _extract_window_extremes(d, "high", ascending=False),
+        "bottom_lows": _extract_window_extremes(d, "low", ascending=True),
         "peaks": [round(float(v), 2) for v in peaks],
         "troughs": [round(float(v), 2) for v in troughs],
     }
+
+
+def _extract_window_extremes(
+    d: pd.DataFrame,
+    price_col: str,
+    ascending: bool,
+    top_k: int = 3,
+) -> List[Dict[str, Any]]:
+    """Return top/bottom price anchors with their occurrence dates."""
+    if d is None or d.empty:
+        return []
+
+    date_col = "time_key" if "time_key" in d.columns else ("date" if "date" in d.columns else None)
+    price_source_col = price_col if price_col in d.columns else "close"
+    if price_source_col not in d.columns:
+        return []
+
+    cols = [price_source_col] + ([date_col] if date_col else [])
+    values = d[cols].copy()
+    values[price_source_col] = pd.Series(
+        pd.to_numeric(values[price_source_col], errors="coerce"),
+        index=values.index,
+        dtype="float64",
+    )
+    values = values[values[price_source_col].notna()].copy()
+    if values.empty:
+        return []
+
+    if date_col:
+        values["_extreme_date"] = values[date_col].map(lambda value: str(value).split(" ")[0])
+        values = values.sort_values(price_source_col, ascending=ascending)
+        values = values.drop_duplicates(subset=["_extreme_date"], keep="first").head(top_k)
+    else:
+        values = values.sort_values(price_source_col, ascending=ascending).head(top_k)
+
+    points: List[Dict[str, Any]] = []
+    for idx, row in values.iterrows():
+        date_value = row.get(date_col) if date_col else idx
+        points.append({
+            "date": str(date_value),
+            "price": round(common_safe_float(row.get(price_source_col)), 2),
+        })
+    return points
 
 
 def _prepare_trend_window_df(
@@ -215,8 +270,8 @@ def _prepare_trend_window_df(
         d = d.sort_values(date_col)
     for col in ("open", "close", "high", "low", "volume", "turnover", "amount", "vwap"):
         if col in d.columns:
-            d[col] = pd.to_numeric(d[col], errors="coerce")
-    d = d.dropna(subset=["close"]).tail(min(max(window_days - 1, 1), len(d))).copy()
+            d[col] = pd.Series(pd.to_numeric(d[col], errors="coerce"), index=d.index, dtype="float64")
+    d = d.dropna(subset=["close"]).tail(min(max(window_days - 1, 1), len(d))).reset_index(drop=True).copy()
     if d.empty:
         return d
 
@@ -225,13 +280,18 @@ def _prepare_trend_window_df(
         rt_price = common_safe_float(d["close"].iloc[-1])
 
     latest_row = d.iloc[-1].copy()
+    if "open" in d.columns:
+        latest_row["open"] = rt_price
     latest_row["close"] = rt_price
     if "high" in d.columns:
-        latest_row["high"] = max(common_safe_float(latest_row.get("high"), rt_price), rt_price)
+        latest_row["high"] = rt_price
     if "low" in d.columns:
-        latest_row["low"] = min(common_safe_float(latest_row.get("low"), rt_price), rt_price)
+        latest_row["low"] = rt_price
+    for vol_col in ("volume", "turnover", "amount"):
+        if vol_col in d.columns:
+            latest_row[vol_col] = 0.0
     if date_col:
-        latest_row[date_col] = common_format_rt_time_label(latest_row.get(date_col))
+        latest_row[date_col] = datetime.now().strftime("%Y-%m-%d %H:%M:%S(RT)")
     d.loc[len(d)] = latest_row
     return d.reset_index(drop=True)
 
@@ -262,6 +322,10 @@ def build_window_trend(
         "volatility_pct": 0.0,
         "poc_range": [0.0, 0.0],
         "poc_ratio_pct": 0.0,
+        "window_high": 0.0,
+        "window_low": 0.0,
+        "top_highs": [],
+        "bottom_lows": [],
         "peaks": [],
         "troughs": [],
     }
@@ -290,18 +354,9 @@ def build_window_trend(
     else:
         mode = "INSUFFICIENT"
 
-    ma20 = close.rolling(20).mean().iloc[-1] if len(close) >= 20 else None
-    ma60 = close.rolling(60).mean().iloc[-1] if len(close) >= 60 else None
-    ma_state = "均线样本不足"
-    if ma20 is not None and not pd.isna(ma20):
-        ma_state = "站上20日均线" if close.iloc[-1] >= ma20 else "跌破20日均线"
-    if ma60 is not None and not pd.isna(ma60):
-        ma_state += "，且在60日均线上方" if close.iloc[-1] >= ma60 else "，且在60日均线下方"
-
     summary = (
-        f"近{window_days}日实际样本{len(close)}日，形态为{features.get('shape', '数据不足')}，"
-        f"区间涨跌{round(return_pct, 2)}%，最大回撤{max_drawdown}%，"
-        f"当前位置位于区间{features.get('position_pct', 0.0)}%，{ma_state}。"
+        f"近{window_days}日实际样本{len(close)}日，区间涨跌{round(return_pct, 2)}%，最大回撤{max_drawdown}%，"
+        f"当前位置位于区间{features.get('position_pct', 0.0)}%。"
     )
 
     return {
@@ -316,6 +371,10 @@ def build_window_trend(
         "volatility_pct": round(volatility_pct, 2),
         "poc_range": poc.get("poc_range", [0.0, 0.0]),
         "poc_ratio_pct": poc.get("poc_ratio_pct", 0.0),
+        "window_high": features.get("window_high", 0.0),
+        "window_low": features.get("window_low", 0.0),
+        "top_highs": features.get("top_highs", []),
+        "bottom_lows": features.get("bottom_lows", []),
         "peaks": features.get("peaks", []),
         "troughs": features.get("troughs", []),
     }

@@ -534,7 +534,8 @@ class FutuClient:
                 return None
             
         try:
-            start_date = (datetime.now() - timedelta(days=num_days + 30)).strftime('%Y-%m-%d') # Get extra days for EMA to warm up
+            fetch_days = num_days * 2 + 30
+            start_date = (datetime.now() - timedelta(days=fetch_days)).strftime('%Y-%m-%d') # Calendar-day buffer for trading-day windows
             end_date = datetime.now().strftime('%Y-%m-%d')
             
             ret, data, page_req_key = self._quote_ctx.request_history_kline(
@@ -543,7 +544,7 @@ class FutuClient:
                 end=end_date, 
                 ktype=KLType.K_DAY, 
                 autype=AuType.QFQ, 
-                max_count=num_days + 30
+                max_count=fetch_days
             )
             
             if ret == 0 and not data.empty:
@@ -569,7 +570,8 @@ class FutuClient:
                 logger.error(f"Failed to init quote context for historical klines {code}: {e}")
                 return None
         try:
-            start_date = (datetime.now() - timedelta(days=num_days + 30)).strftime("%Y-%m-%d")
+            fetch_days = num_days * 2 + 30
+            start_date = (datetime.now() - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
             end_date = datetime.now().strftime("%Y-%m-%d")
             ret, data, _ = self._quote_ctx.request_history_kline(
                 code,
@@ -577,7 +579,7 @@ class FutuClient:
                 end=end_date,
                 ktype=KLType.K_DAY,
                 autype=AuType.QFQ,
-                max_count=num_days + 30,
+                max_count=fetch_days,
             )
             if ret == 0 and data is not None and not data.empty:
                 return data

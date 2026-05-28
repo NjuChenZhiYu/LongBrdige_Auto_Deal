@@ -45,9 +45,11 @@ def generate_prompt_file(
 
     capital_data = futu_client.get_capital_flow(standard_symbol)
 
+    max_trend_window = max(30, lookback_days_mid, 180)
+    kline_days = max(max_trend_window + 60, 240)
     klines_df = futu_client.get_hk_historical_klines(
         standard_symbol,
-        max(lookback_days_mid + 60, 240),
+        kline_days,
     )
     if klines_df is None or klines_df.empty:
         raise RuntimeError(f"未获取到 {standard_symbol} 历史K线数据，无法生成 prompt。")
@@ -80,7 +82,7 @@ def generate_prompt_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="根据股票代码生成 _build_single_stock_prompt 的原始 prompt 并落盘。"
+        description="根据股票代码生成 _build_single_stock_prompt 的原始 prompt 并落盘，包含30/mid/180日多周期窗口极值。"
     )
     parser.add_argument("symbol", help="股票代码，例如 09880 / HK.09880")
     parser.add_argument(
@@ -89,7 +91,12 @@ def main() -> None:
         help="输出目录（默认: tmp/stock_promt_storage）",
     )
     parser.add_argument("--short", type=int, default=10, help="短期窗口天数，默认 10")
-    parser.add_argument("--mid", type=int, default=90, help="多周期核心窗口天数，默认 90")
+    parser.add_argument(
+        "--mid",
+        type=int,
+        default=90,
+        help="多周期核心窗口天数，默认 90；脚本固定同时生成 30/mid/180 日窗口",
+    )
     args = parser.parse_args()
 
     try:
