@@ -16,6 +16,7 @@ from src.analysis.single_stock_math_calculate import (
 from src.analysis.single_stock_feature_builder import (
     calculate_tag_today_by_derivatives as common_calculate_tag_today_by_derivatives,
     build_current_day_indicator as common_build_current_day_indicator,
+    build_liquidity_profiles as common_build_liquidity_profiles,
     empty_short_term_payload as common_empty_short_term_payload,
     build_multi_window_trends as common_build_multi_window_trends,
     build_mid_trade_features as common_build_mid_trade_features,
@@ -324,6 +325,7 @@ def build_hk_fundamental_data(
     symbol: str,
     base_snapshot: Optional[Dict[str, Any]] = None,
     flow_windows: Optional[tuple] = (5, 10, 90),
+    klines_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """
     单股基本面构建统一入口：
@@ -331,6 +333,7 @@ def build_hk_fundamental_data(
     2) 拉取完整快照（补全 get_special_quotes 的裁剪字段）
     3) 聚合多窗口资金流（5/10/90 日，T-1 历史锚）
     4) 拼接今日盘中实时资金（get_today_capital_flow）
+    5) 如传入 K 线，计算成交额/换手率 20/60/180 流动性画像
     """
     from src.api.futu.client import futu_client
 
@@ -363,6 +366,7 @@ def build_hk_fundamental_data(
     )
     fundamental_data["plate_info"] = plate_info
     fundamental_data.update(get_today_capital_flow(symbol))
+    fundamental_data.update(common_build_liquidity_profiles(klines_df, finance_snapshot))
     return fundamental_data
 
 

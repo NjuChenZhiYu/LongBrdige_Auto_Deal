@@ -105,25 +105,29 @@ class LLMAnalyst:
     - 总股本：{fundamental_data.get('issued_shares', '无数据')}
     - 流通股本：{fundamental_data.get('outstanding_shares', '无数据')}
     - 资产净值：{fundamental_data.get('net_asset', '无数据')}
+    - 业绩兑现（Longbridge营收/同比）：{fundamental_data.get('revenue_disclosure_profile', '无数据')}
     - 每股盈利(EPS)：{fundamental_data.get('earning_per_share', '无数据')}
     - 每股净资产(BPS)：{fundamental_data.get('net_asset_per_share', '无数据')}
     - PB：{fundamental_data.get('pb_ratio', '无数据')}
     - 市盈率TTM：{fundamental_data.get('pe_ttm', '无数据')}
     
-    【筹码与流动性档案】
-    - 当日资金（实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
-    - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_5d', '无数据')}
-    - 近10日资金：主力大单净流入 {fundamental_data.get('main_in_flow_10d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_10d', '无数据')}
-    - 近90日资金：主力大单净流入 {fundamental_data.get('main_in_flow_90d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_90d', '无数据')}
+    【资金流与流动性】
+    - 资金方向（当日实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
+    - 资金方向（历史窗口）：5日主力/整体 {fundamental_data.get('main_in_flow_5d', '无数据')} / {fundamental_data.get('total_in_flow_5d', '无数据')}；10日主力/整体 {fundamental_data.get('main_in_flow_10d', '无数据')} / {fundamental_data.get('total_in_flow_10d', '无数据')}；90日主力/整体 {fundamental_data.get('main_in_flow_90d', '无数据')} / {fundamental_data.get('total_in_flow_90d', '无数据')}
+    - 短线量能状态（仅解释 tag_today，不单独等同流动性承接）：{today.get('volume_regime', '见tag_today')}
+    - 成交额承接（相对20/60/180日，偏低/安全/偏高）：{fundamental_data.get('turnover_liquidity_profile', '暂无结构化数据')}
+    - 换手率承接（相对20/60/180日，偏低/安全/偏高）：{fundamental_data.get('turnover_rate_liquidity_profile', '暂无结构化数据')}
+    - 承接解释约束：成交额/换手率偏高不自动利多、偏低不自动利空，必须结合当日涨跌幅、价格所处低/中/高位、趋势筹码与是否高位滞涨或放量下跌判断。
+    - 口径约束：成交额/换手率 15:00 前使用最近完整交易日，15:00 后且快照确认当日才使用当天累计值；短线放量/缩量与中期流动性不得重复计分。
 
-    【短期记忆（近10日）】
+    【趋势筹码与短期结构】
     - window_used (实际可用天数): {short_memory.get('window_used')}
     - short_window_incomplete (是否不足10日): {short_memory.get('short_window_incomplete')}
-    - 主力净流(万): {short_memory.get('smart_net_wan')}
-    - 散户净流(万): {short_memory.get('retail_net_wan')}
     - 当日快照:
       - date (日期): {today.get('date')}
       - rt_price (此刻价格): {today.get('rt_price')}
+      - day_high_low (当日最高/最低): {today.get('day_high_low')}
+      - intraday_position (当前价日内位置): {today.get('intraday_position')}
       - change_rate (当日涨跌幅): {today.get('change_rate')}%
       - bias20 (乖离率，仅观测指标): {today.get('bias20')}%
       - tag_today (当日结构信号): {today.get('tag_today')}
@@ -140,22 +144,32 @@ class LLMAnalyst:
 {trend_lines}
 
     请按以下结构输出（Markdown）：
-    1. 核心结论（先给方向，40-80字，必须含量化打分）
-       * 第一行固定格式：`【量化综合做多指数：评级(如★★★★☆) (X/100) - 一句话方向总结】`
-       * “-”右侧的“一句话方向总结”必填，不可省略；示例：`右侧爆发临界点，强烈买入`
+    1. 核心结论（先给方向，40-100字，必须含两套量化评分）
+       * 第一行固定格式：`【当前交易做多指数：评级(如★★★☆☆) (X/100) - 一句话方向总结】`
+       * “-”右侧的“一句话方向总结”必填，不可省略；必须是可交易动作，例如“不追高/减仓/等待回踩确认/小仓试探”。
        * `X` 取值 0-100（整数）；`0-39=★`，`40-59=★★`，`60-74=★★★`，`75-89=★★★★`，`90-100=★★★★★`
-       * 第二行用 40-80 字给出方向结论，并解释该分数最关键的 1-2 个驱动因子；需与第一行方向保持一致。
-    2. 基本面与估值透视（中长期推演，250-300字）
+       * 第二行必须列出当前交易评分：资金方向20 + 流动性承接20 + 趋势筹码25 + 位置风险20 + 事件确认15 = X/100，并解释最关键的 1-2 个驱动因子。
+       * 第三行必须列出资产质量评分：赛道关联性20 + 业务真实性20 + 财务兑现25 + 估值合理性20 + 事件/产业催化15 = Y/100。若资产质量评分与当前交易评分背离，必须解释背离原因。
+    2. 基本面与估值透视（中长期推演，180-240字）
          * 严禁单纯罗列数据，必须穿透财务快照形成定价逻辑。
-         * 【买方四大公理映射】：必须审视标的业务契合了以下哪几条底层公理，并据此定性资产属性（防御型现金奶牛 vs 进攻型高爆发成长）。公理存在权重差异：1.出海与全球化能力(40%，即中外剪刀差：成本RMB化，收益外汇化，这是硬科技公司活下去的首要条件)；2.AI产业层级与关联度(30%，精准定位标的在AI产业链上下游传导的位置，区分是算力基建Tier1/核心模型与强关联组件Tier2/深度赋能Tier3，还是仅仅作为辅助工具的边缘应用Tier4，只有Tier1-3才能享受高赔率期权溢价)；4.老龄化不可逆(20%)；3.物理世界运转效率跃升(10%)。若不符合任何一条，直接给出“不予买入”结论；若同时满足1和2（双核驱动），必须给予极高溢价并大幅上调中长期评分；满足其他组合则适度上调。
-         * 重塑估值锚：对于轻资产科技股（18C等），严禁使用 BPS/PB 评估安全边际，必须使用 PS (市销率)；并通过联网检索全球1-2家最可比公司（优先美股）PS做对标，明确给出“稀缺性溢价”或“严重低估”结论。
-         * 筹码与流动性：直接基于【筹码与流动性档案】中明确的短中长期“主力”与“整体”资金流向数据进行研判，结合【总/流通市值】定性真实的盘口博弈状态（如：主力托底散户抛售、主力出逃散户接盘等），无需主观猜测机构动向。
-    3. 技术面证据链（短期当日信号 + 布林轨位置 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 30/90/180日空间位置，200字左右）
+         * 必须区分“赛道相关性”和“财务兑现”：好赛道只代表想象空间，不能直接等同于高质量基本面；必须结合收入规模、盈利路径、现金流、付费意愿、订单/客户质量和估值兑现难度判断。
+         * 【买方公理映射】用于判断赛道关联性，但不能替代财务判断。需审视标的契合哪几条底层公理，并据此定性资产属性：1.出海与全球化能力；2.AI产业层级与关联度；3.老龄化不可逆；4.物理世界运转效率跃升。若只符合热门概念但缺少财务或商业化证据，必须写出“叙事强、兑现弱”。
+         * 重塑估值锚：对于轻资产科技股（18C等），严禁使用 BPS/PB 单独评估安全边际，必须使用 PS (市销率)；并通过联网检索全球1-2家最可比公司（优先美股）PS做对标。结论必须允许三类：稀缺性溢价合理、严重低估、估值远离业绩支撑/叙事溢价透支。
+    3. 事件支撑与催化真实性（80-120字）
+       * 必须判断本轮上涨或下跌是否有真实、可验证、足够重大的事件支撑。
+       * 有效事件包括：创新药临床关键节点成功、监管批准、重大订单/合同、财报显著超预期、可量化影响收入或利润的产业政策。
+       * 无效事件包括：模糊概念、市场传闻、媒体热度、公司宣布进入热门方向但缺少收入/订单/技术验证。无真实事件支撑时，事件确认不得高分。
+    4. 流动性证据链（资金方向 + 成交额承接 + 换手率承接 + 短线量能确认，150-220字）
+       * 必须基于【资金流与流动性】判断当前交易评分中的流动性承接20分：资金方向看主力/整体是否同向且持续，成交额看真实承接能力，换手率看筹码交换效率。
+       * 成交额/换手率偏高不自动利多：低位放量可能是承接或反转，中位放量可能是分歧换手，高位放量优先怀疑派发或诱多。
+       * 必须明确区分：tag_today 中的放量/缩量只代表短线量能偏离，不能与成交额/换手率承接重复计分；若 tag_today 已提示高位派发，流动性不能按健康承接给高分。
+    5. 技术面证据链（短期当日信号 + 布林轨位置 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 30/90/180日空间位置，200字左右）
        * 必须解释 tag_today 的量价含义，并结合 bollinger_position、bias20、poc_range_10d、poc_ratio_10d_pct、30/90/180日空间位置判断该信号处于低位/中位/高位，说明多周期是否共振。
-       * 若 tag_today 含"缩量/放量"，必须说明其更接近低位承接、分歧换手还是高位派发风险，并给出明确操作评分：看多 1-5、看空 1-5，以及对应的仓位动作。
-     4. 交易计划（入场条件、止损位、失效条件，100-150字）
-    5. 核心风险/证伪条件（除常规止损外，必须给出1条可导致逻辑瞬间崩塌的非结构化风险触发，如宏观事件/产业政策，40-80字）
-    6. 联网检索证据（固定三行）
+       * 若 tag_today 含"缩量/放量"，必须说明它是短线量能偏离，并结合位置判断更接近低位抛压衰减、分歧换手还是高位派发/缺乏承接。
+       * 若出现“主升浪降速/高位震荡/诱多 + 放量”，必须执行一票否决检查：若同时处于多周期高位、bias20 明显正乖离、成交额/换手率极端偏高，且没有真实事件支撑，则当前交易做多指数封顶55；若同时财务兑现弱或估值远离业绩支撑，则封顶45。
+    6. 交易计划（入场条件、止损位、失效条件，100-150字）
+    7. 核心风险/证伪条件（除常规止损外，必须给出1条可导致逻辑瞬间崩塌的非结构化风险触发，如宏观事件/产业政策，40-80字）
+    8. 联网检索证据（固定三行）
        * 检索时间：YYYY-MM-DD HH:MM（北京时间）
        * 对标来源域名：至少3个，格式示例 finance.yahoo.com | companiesmarketcap.com | wsj.com
        * 对标公司与PS时点：公司A(代码) PS=xx（时点）；公司B(代码) PS=yy（时点）
@@ -269,6 +283,8 @@ class LLMAnalyst:
     - 当日快照:
       - date (日期): {today.get('date')}
       - rt_price (此刻价格): {today.get('rt_price')}
+      - day_high_low (当日最高/最低): {today.get('day_high_low')}
+      - intraday_position (当前价日内位置): {today.get('intraday_position')}
       - change_rate (当日涨跌幅): {today.get('change_rate')}%
       - bias20 (乖离率): {today.get('bias20')}%
       - tag_today (当日结构信号): {today.get('tag_today')}
@@ -487,24 +503,33 @@ class LLMAnalyst:
                 standard_symbol,
                 max(lookback_days_mid + 60, 240),
             )
-            if klines_df is None or klines_df.empty:
+            if not isinstance(klines_df, pd.DataFrame) or klines_df.empty:
                 msg = f"未获取到 {standard_symbol} 历史K线数据，无法生成短期与多周期分析。"
                 logger.warning(f"[Gemini/SingleStock] {msg}")
                 return {"ok": False, "symbol": standard_symbol, "title": None, "report": None, "error": msg}
+            hk_klines_df: pd.DataFrame = klines_df
 
             from src.analysis.futu_math_indicator import (
                 build_short_term_memory,
                 build_mid_term_trend,
                 build_hk_fundamental_data,
             )
-            short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
-            mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
+            short_memory = build_short_term_memory(hk_klines_df, stock, capital_data, lookback_days_short)
+            mid_trend = build_mid_term_trend(hk_klines_df, price, lookback_days_mid)
             fundamental_data = await asyncio.to_thread(
                 build_hk_fundamental_data,
                 standard_symbol,
                 stock,
                 (5, 10, 90),
+                hk_klines_df,
             )
+            try:
+                fundamental_data["revenue_disclosure_profile"] = await longport_client.get_revenue_disclosure_profile(
+                    standard_symbol
+                )
+            except Exception as e:
+                logger.warning(f"[Gemini/SingleStock] Longbridge revenue profile unavailable for {standard_symbol}: {e}")
+                fundamental_data["revenue_disclosure_profile"] = "长桥营收披露数据暂不可用"
             prompt = self._build_single_stock_prompt(
                 symbol_for_prompt,
                 current_time,
