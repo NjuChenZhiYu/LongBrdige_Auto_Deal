@@ -1,10 +1,12 @@
 """LLM Analyst service for generating daily market reports."""
 import logging
 import asyncio
+import os
 import re
 from typing import Optional, Dict, List, Any
 import numpy as np
 import pandas as pd
+import yaml
 from openai import AsyncOpenAI
 from config.settings import Settings
 from src.services.signal_recorder import signal_recorder
@@ -34,6 +36,7 @@ class LLMAnalyst:
         self.hk_model = Settings.KIMI_LLM_MODEL
         self.hk_client = AsyncOpenAI(api_key=self.hk_api_key, base_url=self.hk_base_url, timeout=60.0) if self.hk_api_key else None
         self.grounded_client = GeminiGroundedClient()
+        self.prompt_templates = self._load_prompt_templates()
         
         # Options report prompt (merged)
         self.options_prompt_template = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
@@ -47,6 +50,44 @@ class LLMAnalyst:
 
 今日期权异动数据:
 {signal_text}"""
+
+    @staticmethod
+    def _load_prompt_templates() -> Dict[str, Any]:
+        """Load prompt template versions from config/prompt_templates.yaml."""
+        config_path = Settings.PROMPT_TEMPLATES_CONFIG_PATH
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Prompt template config not found: {config_path}")
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+        except Exception as e:
+            raise RuntimeError(f"Failed to load prompt template config: {config_path}: {e}") from e
+        if not isinstance(data, dict):
+            raise ValueError(f"Prompt template config must be a mapping: {config_path}")
+        return data
+
+    def _get_prompt_output_rules(self, group_name: str, template_name: Optional[str] = None) -> str:
+        """Resolve a named prompt template group to its output-rule text."""
+        group = self.prompt_templates.get(group_name)
+        if not isinstance(group, dict):
+            raise ValueError(f"Prompt template group not found: {group_name}")
+
+        selected_name = template_name or group.get("active")
+        templates = group.get("templates")
+        if not selected_name or not isinstance(templates, dict):
+            raise ValueError(f"Prompt template group is missing active/templates: {group_name}")
+
+        selected = templates.get(selected_name)
+        if not isinstance(selected, dict):
+            available = ", ".join(sorted(templates.keys()))
+            raise ValueError(
+                f"Prompt template '{selected_name}' not found in {group_name}. Available: {available}"
+            )
+
+        output_rules = selected.get("output_rules")
+        if not isinstance(output_rules, str) or not output_rules.strip():
+            raise ValueError(f"Prompt template '{group_name}.{selected_name}' is missing output_rules")
+        return output_rules.strip()
 
     @staticmethod
     def _format_multi_window_trend_lines(mid_trend: Dict[str, Any]) -> str:
@@ -81,6 +122,7 @@ class LLMAnalyst:
         fundamental_data: Dict[str, Any],
         short_memory: Dict[str, Any],
         mid_trend: Dict[str, Any],
+        prompt_template: Optional[str] = None,
     ) -> str:
         """Build final LLM prompt from structured short/mid features."""
         today = short_memory.get("today", {}) or {}
@@ -91,6 +133,7 @@ class LLMAnalyst:
         except Exception:
             drawdown_10d_fmt = "无数据"
         trend_lines = self._format_multi_window_trend_lines(mid_trend)
+        output_rules = self._get_prompt_output_rules("hk_single_stock", prompt_template)
         return f"""你是港股量化深度分析师。请基于下面结构化数据生成单股研报。
     【报告时间】
     {current_time}
@@ -120,6 +163,11 @@ class LLMAnalyst:
     - 承接解释约束：成交额/换手率偏高不自动利多、偏低不自动利空，必须结合当日涨跌幅、价格所处低/中/高位、趋势筹码与是否高位滞涨或放量下跌判断。
     - 口径约束：成交额/换手率 15:00 前使用最近完整交易日，15:00 后且快照确认当日才使用当天累计值；短线放量/缩量与中期流动性不得重复计分。
 
+    【长期持有人与筹码集中度】
+    - 机构持仓趋势（最新报告期）：{fundamental_data.get('institutional_holding_profile', '无数据')}
+    - 股东持仓变动（仅最新报告期）：{fundamental_data.get('shareholder_holding_change_profile', '无数据')}
+    - 解读约束：机构持仓和股东变动为季度级滞后数据，只作为中期筹码集中度证据；不得因单条小额增持直接看多，也不得忽略核心股东或知名机构减持。
+
     【趋势筹码与短期结构】
     - window_used (实际可用天数): {short_memory.get('window_used')}
     - short_window_incomplete (是否不足10日): {short_memory.get('short_window_incomplete')}
@@ -143,41 +191,7 @@ class LLMAnalyst:
     【多周期趋势与位置】
 {trend_lines}
 
-    请按以下结构输出（Markdown）：
-    1. 核心结论（先给方向，40-100字，必须含两套量化评分）
-       * 第一行固定格式：`【当前交易做多指数：评级(如★★★☆☆) (X/100) - 一句话方向总结】`
-       * “-”右侧的“一句话方向总结”必填，不可省略；必须是可交易动作，例如“不追高/减仓/等待回踩确认/小仓试探”。
-       * `X` 取值 0-100（整数）；`0-39=★`，`40-59=★★`，`60-74=★★★`，`75-89=★★★★`，`90-100=★★★★★`
-       * 第二行必须列出当前交易评分：资金方向20 + 流动性承接20 + 趋势筹码25 + 位置风险20 + 事件确认15 = X/100，并解释最关键的 1-2 个驱动因子。
-       * 第三行必须列出资产质量评分：赛道关联性20 + 业务真实性20 + 财务兑现25 + 估值合理性20 + 事件/产业催化15 = Y/100。若资产质量评分与当前交易评分背离，必须解释背离原因。
-    2. 基本面与估值透视（中长期推演，180-240字）
-         * 严禁单纯罗列数据，必须穿透财务快照形成定价逻辑。
-         * 必须区分“赛道相关性”和“财务兑现”：好赛道只代表想象空间，不能直接等同于高质量基本面；必须结合收入规模、盈利路径、现金流、付费意愿、订单/客户质量和估值兑现难度判断。
-         * 【买方公理映射】用于判断赛道关联性，但不能替代财务判断。需审视标的契合哪几条底层公理，并据此定性资产属性：1.出海与全球化能力；2.AI产业层级与关联度；3.老龄化不可逆；4.物理世界运转效率跃升。若只符合热门概念但缺少财务或商业化证据，必须写出“叙事强、兑现弱”。
-         * 重塑估值锚：对于轻资产科技股（18C等），严禁使用 BPS/PB 单独评估安全边际，必须使用 PS (市销率)；并通过联网检索全球1-2家最可比公司（优先美股）PS做对标。结论必须允许三类：稀缺性溢价合理、严重低估、估值远离业绩支撑/叙事溢价透支。
-    3. 事件支撑与催化真实性（80-120字）
-       * 必须判断本轮上涨或下跌是否有真实、可验证、足够重大的事件支撑。
-       * 有效事件包括：创新药临床关键节点成功、监管批准、重大订单/合同、财报显著超预期、可量化影响收入或利润的产业政策。
-       * 无效事件包括：模糊概念、市场传闻、媒体热度、公司宣布进入热门方向但缺少收入/订单/技术验证。无真实事件支撑时，事件确认不得高分。
-    4. 流动性证据链（资金方向 + 成交额承接 + 换手率承接 + 短线量能确认，150-220字）
-       * 必须基于【资金流与流动性】判断当前交易评分中的流动性承接20分：资金方向看主力/整体是否同向且持续，成交额看真实承接能力，换手率看筹码交换效率。
-       * 成交额/换手率偏高不自动利多：低位放量可能是承接或反转，中位放量可能是分歧换手，高位放量优先怀疑派发或诱多。
-       * 必须明确区分：tag_today 中的放量/缩量只代表短线量能偏离，不能与成交额/换手率承接重复计分；若 tag_today 已提示高位派发，流动性不能按健康承接给高分。
-    5. 技术面证据链（短期当日信号 + 布林轨位置 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 30/90/180日空间位置，200字左右）
-       * 必须解释 tag_today 的量价含义，并结合 bollinger_position、bias20、poc_range_10d、poc_ratio_10d_pct、30/90/180日空间位置判断该信号处于低位/中位/高位，说明多周期是否共振。
-       * 若 tag_today 含"缩量/放量"，必须说明它是短线量能偏离，并结合位置判断更接近低位抛压衰减、分歧换手还是高位派发/缺乏承接。
-       * 若出现“主升浪降速/高位震荡/诱多 + 放量”，必须执行一票否决检查：若同时处于多周期高位、bias20 明显正乖离、成交额/换手率极端偏高，且没有真实事件支撑，则当前交易做多指数封顶55；若同时财务兑现弱或估值远离业绩支撑，则封顶45。
-    6. 交易计划（入场条件、止损位、失效条件，100-150字）
-    7. 核心风险/证伪条件（除常规止损外，必须给出1条可导致逻辑瞬间崩塌的非结构化风险触发，如宏观事件/产业政策，40-80字）
-    8. 联网检索证据（固定三行）
-       * 检索时间：YYYY-MM-DD HH:MM（北京时间）
-       * 对标来源域名：至少3个，格式示例 finance.yahoo.com | companiesmarketcap.com | wsj.com
-       * 对标公司与PS时点：公司A(代码) PS=xx（时点）；公司B(代码) PS=yy（时点）
-
-    要求：
-    - 结论必须可交易，禁止空泛表述。
-    - 必须主动寻找“反面逻辑”，禁止只做线性外推（单边看多或单边看空）。
-    - 若样本不足（short_window_incomplete=true 或多周期趋势中任一关键窗口实际样本少于目标窗口），必须显式提示不确定性。"""
+{output_rules}"""
 
     async def _call_llm_with_retry(
         self,
@@ -238,6 +252,7 @@ class LLMAnalyst:
         fundamental_data: Dict[str, Any],
         short_memory: Dict[str, Any],
         mid_trend: Dict[str, Any],
+        prompt_template: Optional[str] = None,
     ) -> str:
         """Build US-market LLM prompt (Futu data source, tech-stock focused)."""
         today = short_memory.get("today", {}) or {}
@@ -248,6 +263,7 @@ class LLMAnalyst:
         except Exception:
             drawdown_10d_fmt = "无数据"
         trend_lines = self._format_multi_window_trend_lines(mid_trend)
+        output_rules = self._get_prompt_output_rules("us_single_stock", prompt_template)
         return f"""你是美股量化深度分析师。请基于下面结构化数据生成单股研报。
     【报告时间】
     {current_time}
@@ -300,31 +316,7 @@ class LLMAnalyst:
     【多周期趋势与位置】
 {trend_lines}
 
-    请按以下结构输出（Markdown）：
-    1. 核心结论（先给方向，40-80字，必须含量化打分）
-       * 第一行固定格式：`【量化综合做多指数：评级(如★★★★☆) (X/100) - 一句话方向总结】`
-       * "-"右侧的"一句话方向总结"必填，不可省略；示例：`右侧爆发临界点，强烈买入`
-       * `X` 取值 0-100（整数）；`0-39=★`，`40-59=★★`，`60-74=★★★`，`75-89=★★★★`，`90-100=★★★★★`
-       * 第二行用 40-80 字给出方向结论，并解释该分数最关键的 1-2 个驱动因子；需与第一行方向保持一致。
-    2. 基本面与估值透视（中长期推演，250-300字）
-       * 严禁单纯罗列数据，必须穿透财务快照形成定价逻辑。
-       * 【买方三大公理映射】：审视标的契合哪几条底层公理。公理权重：1.行业潜力与增长度(40%，所在赛道是否处于高成长阶段、市场空间有多大，公司占市场份额大概有多少)；2.AI产业层级与关联度(40%，精准定位标的在AI产业链上下游传导的位置，算力基建Tier1/核心模型与强关联组件Tier2/深度赋能Tier3/边缘辅助应用Tier4，只有Tier1-3才能享受高赔率期权溢价)；3.物理世界运转效率跃升(20%，降本增效的直接受益者)。若不符合任何一条，直接给出"不予买入"结论；若同时满足1和2（双核驱动），给予极高溢价并大幅上调中长期评分。
-       * 重塑估值锚：轻资产科技股必须用 PS(市销率)评估，联网检索全球1-2家最可比美股公司 PS 做对标，明确给出"稀缺性溢价"或"严重低估"结论。
-       * 筹码与流动性：直接基于【筹码与流动性档案】中明确的短中长期"主力"与"整体"资金流向数据进行研判，结合【总/流通市值】定性真实的盘口博弈状态，无需主观猜测机构动向。
-    3. 技术面证据链（短期当日信号 + 布林轨位置 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 30/90/180日空间位置，200字左右）
-       * 必须解释 tag_today 的量价含义，并结合 bollinger_position、bias20、poc_range_10d、poc_ratio_10d_pct、30/90/180日空间位置判断该信号处于低位/中位/高位，说明多周期是否共振。
-       * 若 tag_today 含“缩量/放量”，必须说明其更接近低位承接、分歧换手还是高位派发风险，并给出明确操作评分：看多 1-5、看空 1-5，以及对应的仓位动作。
-    4. 交易计划（入场条件、止损位、失效条件，100-150字）
-    5. 核心风险/证伪条件（除常规止损外，必须给出1条可导致逻辑瞬间崩塌的非结构化风险触发，如宏观事件/产业政策，40-80字）
-    6. 联网检索证据（固定三行）
-       * 检索时间：YYYY-MM-DD HH:MM（北京时间）
-       * 对标来源域名：至少3个，格式示例 finance.yahoo.com | companiesmarketcap.com | wsj.com
-       * 对标公司与PS时点：公司A(代码) PS=xx（时点）；公司B(代码) PS=yy（时点）
-
-    要求：
-    - 结论必须可交易，禁止空泛表述。
-    - 必须主动寻找"反面逻辑"，禁止只做线性外推（单边看多或单边看空）。
-    - 若样本不足（short_window_incomplete=true 或多周期趋势中任一关键窗口实际样本少于目标窗口），必须显式提示不确定性。"""
+{output_rules}"""
 
     @staticmethod
     def _parse_us_symbol(symbol_input: str) -> Optional[str]:

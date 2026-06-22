@@ -425,6 +425,89 @@ class FutuClient:
             logger.error(f"Error getting capital flow history for {symbol}: {e}")
             return None
 
+    def get_shareholders_institutional(
+        self,
+        symbol: str,
+        next_key: Optional[str] = None,
+        num: Optional[int] = 10,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Get institutional holder history for a stock.
+        """
+        if not self._quote_ctx:
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for institutional holders {symbol}: {e}")
+                return None
+
+        try:
+            method = getattr(self._quote_ctx, "get_shareholders_institutional", None)
+            if method is None:
+                logger.warning("Futu SDK does not expose get_shareholders_institutional")
+                return None
+
+            ret, data = method(
+                symbol,
+                next_key=next_key,
+                num=num,
+            )
+            if ret == 0 and data is not None and not data.empty:
+                return data
+            logger.warning(f"Failed to get institutional holders for {symbol}: {data}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting institutional holders for {symbol}: {e}")
+            return None
+
+    def get_shareholders_holding_changes(
+        self,
+        symbol: str,
+        next_key: Optional[str] = None,
+        num: Optional[int] = 50,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Get shareholder holding changes for a stock.
+
+        Prefer date-sorted results when the installed Futu SDK accepts raw sort
+        codes; fall back to the SDK defaults for compatibility.
+        """
+        if not self._quote_ctx:
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for holder changes {symbol}: {e}")
+                return None
+
+        try:
+            method = getattr(self._quote_ctx, "get_shareholders_holding_changes", None)
+            if method is None:
+                logger.warning("Futu SDK does not expose get_shareholders_holding_changes")
+                return None
+
+            try:
+                ret, data = method(
+                    symbol,
+                    next_key=next_key,
+                    num=num,
+                    sort_type=1,    # Descending
+                    sort_column=63,  # Holding date
+                )
+            except TypeError:
+                ret, data = method(
+                    symbol,
+                    next_key=next_key,
+                    num=num,
+                )
+
+            if ret == 0 and data is not None and not data.empty:
+                return data
+            logger.warning(f"Failed to get shareholder holding changes for {symbol}: {data}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting shareholder holding changes for {symbol}: {e}")
+            return None
+
     def get_stock_filter_metrics(
         self,
         symbol: str,

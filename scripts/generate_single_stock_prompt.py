@@ -3,6 +3,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime
+from typing import Optional
 
 import pandas as pd
 
@@ -29,6 +30,7 @@ def generate_prompt_file(
     output_dir: str,
     lookback_days_short: int = 10,
     lookback_days_mid: int = 90,
+    prompt_template: Optional[str] = None,
 ) -> str:
     analyst = LLMAnalyst()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -68,6 +70,8 @@ def generate_prompt_file(
         (5, 10, 90),
         klines_df,
     )
+    #print(f"[INFO] 机构持仓趋势: {fundamental_data.get('institutional_holding_profile', '无数据')}")
+    #print(f"[INFO] 股东持仓变动: {fundamental_data.get('shareholder_holding_change_profile', '无数据')}")
     try:
         fundamental_data["revenue_disclosure_profile"] = asyncio.run(
             longport_client.get_revenue_disclosure_profile(standard_symbol)
@@ -81,6 +85,7 @@ def generate_prompt_file(
         fundamental_data,
         short_memory,
         mid_trend,
+        prompt_template=prompt_template,
     )
 
     os.makedirs(output_dir, exist_ok=True)
@@ -95,7 +100,7 @@ def generate_prompt_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="根据股票代码生成 _build_single_stock_prompt 的原始 prompt 并落盘，包含30/mid/180日多周期窗口极值。"
+        description="根据股票代码生成 _build_single_stock_prompt 的原始 prompt 并落盘，包含30/mid/180日窗口、机构持仓与股东持仓变动摘要。"
     )
     parser.add_argument("symbol", help="股票代码，例如 09880 / HK.09880")
     parser.add_argument(
@@ -110,6 +115,11 @@ def main() -> None:
         default=90,
         help="多周期核心窗口天数，默认 90；脚本固定同时生成 30/mid/180 日窗口",
     )
+    parser.add_argument(
+        "--prompt-template",
+        default=None,
+        help="指定 config/prompt_templates.yaml 中 hk_single_stock.templates 的版本名；默认使用 active",
+    )
     args = parser.parse_args()
 
     try:
@@ -118,6 +128,7 @@ def main() -> None:
             output_dir=args.output_dir,
             lookback_days_short=args.short,
             lookback_days_mid=args.mid,
+            prompt_template=args.prompt_template,
         )
         print(f"[OK] Prompt 已写入: {output_file}")
     finally:

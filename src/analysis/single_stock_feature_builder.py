@@ -447,6 +447,12 @@ def _normalize_turnover_rate_pct(value: float, source_col: str) -> float:
     return value
 
 
+def _normalize_snapshot_turnover_rate_pct(value: float, source_key: str) -> float:
+    if source_key == "turnover_rate":
+        return value
+    return _normalize_turnover_rate_pct(value, source_key)
+
+
 def _build_single_liquidity_profile(
     klines_df: Optional[pd.DataFrame],
     stock_snapshot: Dict[str, Any],
@@ -500,7 +506,11 @@ def _build_single_liquidity_profile(
             )
             parsed = parsed_series.iloc[0]
             if not pd.isna(parsed) and float(parsed) > 0:
-                current_value = _normalize_turnover_rate_pct(float(parsed), key) if metric_name == "turnover_rate" else float(parsed)
+                current_value = (
+                    _normalize_snapshot_turnover_rate_pct(float(parsed), key)
+                    if metric_name == "turnover_rate"
+                    else float(parsed)
+                )
                 break
         if current_value is None and metric_name == "turnover_rate":
             outstanding_shares = common_safe_float(stock_snapshot.get("outstanding_shares"), 0.0)
