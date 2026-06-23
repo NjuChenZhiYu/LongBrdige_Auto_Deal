@@ -347,6 +347,9 @@ class FutuClient:
                             'last_price': last_price,
                             'change_rate': change_rate,
                             'prev_close': prev_close,
+                            'open_price': row.get('open_price', 0),
+                            'high_price': row.get('high_price', 0),
+                            'low_price': row.get('low_price', 0),
                             'volume': row.get('volume', 0),
                             'turnover': row.get('turnover', 0),
                             'update_time': row.get('update_time', ''),
@@ -420,6 +423,89 @@ class FutuClient:
             return None
         except Exception as e:
             logger.error(f"Error getting capital flow history for {symbol}: {e}")
+            return None
+
+    def get_shareholders_institutional(
+        self,
+        symbol: str,
+        next_key: Optional[str] = None,
+        num: Optional[int] = 10,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Get institutional holder history for a stock.
+        """
+        if not self._quote_ctx:
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for institutional holders {symbol}: {e}")
+                return None
+
+        try:
+            method = getattr(self._quote_ctx, "get_shareholders_institutional", None)
+            if method is None:
+                logger.warning("Futu SDK does not expose get_shareholders_institutional")
+                return None
+
+            ret, data = method(
+                symbol,
+                next_key=next_key,
+                num=num,
+            )
+            if ret == 0 and data is not None and not data.empty:
+                return data
+            logger.warning(f"Failed to get institutional holders for {symbol}: {data}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting institutional holders for {symbol}: {e}")
+            return None
+
+    def get_shareholders_holding_changes(
+        self,
+        symbol: str,
+        next_key: Optional[str] = None,
+        num: Optional[int] = 50,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Get shareholder holding changes for a stock.
+
+        Prefer date-sorted results when the installed Futu SDK accepts raw sort
+        codes; fall back to the SDK defaults for compatibility.
+        """
+        if not self._quote_ctx:
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for holder changes {symbol}: {e}")
+                return None
+
+        try:
+            method = getattr(self._quote_ctx, "get_shareholders_holding_changes", None)
+            if method is None:
+                logger.warning("Futu SDK does not expose get_shareholders_holding_changes")
+                return None
+
+            try:
+                ret, data = method(
+                    symbol,
+                    next_key=next_key,
+                    num=num,
+                    sort_type=1,    # Descending
+                    sort_column=63,  # Holding date
+                )
+            except TypeError:
+                ret, data = method(
+                    symbol,
+                    next_key=next_key,
+                    num=num,
+                )
+
+            if ret == 0 and data is not None and not data.empty:
+                return data
+            logger.warning(f"Failed to get shareholder holding changes for {symbol}: {data}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting shareholder holding changes for {symbol}: {e}")
             return None
 
     def get_stock_filter_metrics(
@@ -534,7 +620,8 @@ class FutuClient:
                 return None
             
         try:
-            start_date = (datetime.now() - timedelta(days=num_days + 30)).strftime('%Y-%m-%d') # Get extra days for EMA to warm up
+            fetch_days = num_days * 2 + 30
+            start_date = (datetime.now() - timedelta(days=fetch_days)).strftime('%Y-%m-%d') # Calendar-day buffer for trading-day windows
             end_date = datetime.now().strftime('%Y-%m-%d')
             
             ret, data, page_req_key = self._quote_ctx.request_history_kline(
@@ -543,7 +630,7 @@ class FutuClient:
                 end=end_date, 
                 ktype=KLType.K_DAY, 
                 autype=AuType.QFQ, 
-                max_count=num_days + 30
+                max_count=fetch_days
             )
             
             if ret == 0 and not data.empty:
@@ -569,7 +656,8 @@ class FutuClient:
                 logger.error(f"Failed to init quote context for historical klines {code}: {e}")
                 return None
         try:
-            start_date = (datetime.now() - timedelta(days=num_days + 30)).strftime("%Y-%m-%d")
+            fetch_days = num_days * 2 + 30
+            start_date = (datetime.now() - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
             end_date = datetime.now().strftime("%Y-%m-%d")
             ret, data, _ = self._quote_ctx.request_history_kline(
                 code,
@@ -577,7 +665,7 @@ class FutuClient:
                 end=end_date,
                 ktype=KLType.K_DAY,
                 autype=AuType.QFQ,
-                max_count=num_days + 30,
+                max_count=fetch_days,
             )
             if ret == 0 and data is not None and not data.empty:
                 return data

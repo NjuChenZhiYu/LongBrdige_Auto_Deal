@@ -1,10 +1,12 @@
 """LLM Analyst service for generating daily market reports."""
 import logging
 import asyncio
+import os
 import re
 from typing import Optional, Dict, List, Any
 import numpy as np
 import pandas as pd
+import yaml
 from openai import AsyncOpenAI
 from config.settings import Settings
 from src.services.signal_recorder import signal_recorder
@@ -34,6 +36,7 @@ class LLMAnalyst:
         self.hk_model = Settings.KIMI_LLM_MODEL
         self.hk_client = AsyncOpenAI(api_key=self.hk_api_key, base_url=self.hk_base_url, timeout=60.0) if self.hk_api_key else None
         self.grounded_client = GeminiGroundedClient()
+        self.prompt_templates = self._load_prompt_templates()
         
         # Options report prompt (merged)
         self.options_prompt_template = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
@@ -48,6 +51,70 @@ class LLMAnalyst:
 今日期权异动数据:
 {signal_text}"""
 
+    @staticmethod
+    def _load_prompt_templates() -> Dict[str, Any]:
+        """Load prompt template versions from config/prompt_templates.yaml."""
+        config_path = Settings.PROMPT_TEMPLATES_CONFIG_PATH
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Prompt template config not found: {config_path}")
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+        except Exception as e:
+            raise RuntimeError(f"Failed to load prompt template config: {config_path}: {e}") from e
+        if not isinstance(data, dict):
+            raise ValueError(f"Prompt template config must be a mapping: {config_path}")
+        return data
+
+    def _get_prompt_output_rules(self, group_name: str, template_name: Optional[str] = None) -> str:
+        """Resolve a named prompt template group to its output-rule text."""
+        group = self.prompt_templates.get(group_name)
+        if not isinstance(group, dict):
+            raise ValueError(f"Prompt template group not found: {group_name}")
+
+        selected_name = template_name or group.get("active")
+        templates = group.get("templates")
+        if not selected_name or not isinstance(templates, dict):
+            raise ValueError(f"Prompt template group is missing active/templates: {group_name}")
+
+        selected = templates.get(selected_name)
+        if not isinstance(selected, dict):
+            available = ", ".join(sorted(templates.keys()))
+            raise ValueError(
+                f"Prompt template '{selected_name}' not found in {group_name}. Available: {available}"
+            )
+
+        output_rules = selected.get("output_rules")
+        if not isinstance(output_rules, str) or not output_rules.strip():
+            raise ValueError(f"Prompt template '{group_name}.{selected_name}' is missing output_rules")
+        return output_rules.strip()
+
+    @staticmethod
+    def _format_multi_window_trend_lines(mid_trend: Dict[str, Any]) -> str:
+        """Format multi-horizon trend snapshots for the LLM prompt."""
+        window_trends = mid_trend.get("window_trends") or []
+        if not window_trends:
+            window_trends = [{
+                "window_days": 90,
+                "summary": mid_trend.get("summary"),
+                "poc_range": mid_trend.get("poc_range", [0.0, 0.0]),
+                "poc_ratio_pct": mid_trend.get("poc_ratio_pct", 0.0),
+                "volatility_pct": mid_trend.get("volatility_pct", 0.0),
+                "top_highs": mid_trend.get("top_highs", []),
+                "bottom_lows": mid_trend.get("bottom_lows", []),
+            }]
+
+        return "\n".join(
+            (
+                f"    - {item.get('window_days')}日：{item.get('summary')} "
+                f"POC={item.get('poc_range')}，POC占比={item.get('poc_ratio_pct')}%，"
+                f"年化波动={item.get('volatility_pct')}%，"
+                f"窗口Top3高点={item.get('top_highs', [])}，"
+                f"窗口Top3低点={item.get('bottom_lows', [])}"
+            )
+            for item in window_trends
+        )
+
     def _build_single_stock_prompt(
         self,
         symbol: str,
@@ -55,6 +122,7 @@ class LLMAnalyst:
         fundamental_data: Dict[str, Any],
         short_memory: Dict[str, Any],
         mid_trend: Dict[str, Any],
+        prompt_template: Optional[str] = None,
     ) -> str:
         """Build final LLM prompt from structured short/mid features."""
         today = short_memory.get("today", {}) or {}
@@ -64,6 +132,8 @@ class LLMAnalyst:
             drawdown_10d_fmt = f"-{abs(float(drawdown_raw))}%"
         except Exception:
             drawdown_10d_fmt = "无数据"
+        trend_lines = self._format_multi_window_trend_lines(mid_trend)
+        output_rules = self._get_prompt_output_rules("hk_single_stock", prompt_template)
         return f"""你是港股量化深度分析师。请基于下面结构化数据生成单股研报。
     【报告时间】
     {current_time}
@@ -78,28 +148,38 @@ class LLMAnalyst:
     - 总股本：{fundamental_data.get('issued_shares', '无数据')}
     - 流通股本：{fundamental_data.get('outstanding_shares', '无数据')}
     - 资产净值：{fundamental_data.get('net_asset', '无数据')}
+    - 业绩兑现（Longbridge营收/同比）：{fundamental_data.get('revenue_disclosure_profile', '无数据')}
     - 每股盈利(EPS)：{fundamental_data.get('earning_per_share', '无数据')}
     - 每股净资产(BPS)：{fundamental_data.get('net_asset_per_share', '无数据')}
     - PB：{fundamental_data.get('pb_ratio', '无数据')}
     - 市盈率TTM：{fundamental_data.get('pe_ttm', '无数据')}
     
-    【筹码与流动性档案】
-    - 当日资金（实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
-    - 近5日资金：主力大单净流入 {fundamental_data.get('main_in_flow_5d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_5d', '无数据')}
-    - 近10日资金：主力大单净流入 {fundamental_data.get('main_in_flow_10d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_10d', '无数据')}
-    - 近90日资金：主力大单净流入 {fundamental_data.get('main_in_flow_90d', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_90d', '无数据')}
+    【资金流与流动性】
+    - 资金方向（当日实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
+    - 资金方向（历史窗口）：5日主力/整体 {fundamental_data.get('main_in_flow_5d', '无数据')} / {fundamental_data.get('total_in_flow_5d', '无数据')}；10日主力/整体 {fundamental_data.get('main_in_flow_10d', '无数据')} / {fundamental_data.get('total_in_flow_10d', '无数据')}；90日主力/整体 {fundamental_data.get('main_in_flow_90d', '无数据')} / {fundamental_data.get('total_in_flow_90d', '无数据')}
+    - 短线量能状态（仅解释 tag_today，不单独等同流动性承接）：{today.get('volume_regime', '见tag_today')}
+    - 成交额承接（相对20/60/180日，偏低/安全/偏高）：{fundamental_data.get('turnover_liquidity_profile', '暂无结构化数据')}
+    - 换手率承接（相对20/60/180日，偏低/安全/偏高）：{fundamental_data.get('turnover_rate_liquidity_profile', '暂无结构化数据')}
+    - 承接解释约束：成交额/换手率偏高不自动利多、偏低不自动利空，必须结合当日涨跌幅、价格所处低/中/高位、趋势筹码与是否高位滞涨或放量下跌判断。
+    - 口径约束：成交额/换手率 15:00 前使用最近完整交易日，15:00 后且快照确认当日才使用当天累计值；短线放量/缩量与中期流动性不得重复计分。
 
-    【短期记忆（近10日）】
+    【长期持有人与筹码集中度】
+    - 机构持仓趋势（最新报告期）：{fundamental_data.get('institutional_holding_profile', '无数据')}
+    - 股东持仓变动（仅最新报告期）：{fundamental_data.get('shareholder_holding_change_profile', '无数据')}
+    - 解读约束：机构持仓和股东变动为季度级滞后数据，只作为中期筹码集中度证据；不得因单条小额增持直接看多，也不得忽略核心股东或知名机构减持。
+
+    【趋势筹码与短期结构】
     - window_used (实际可用天数): {short_memory.get('window_used')}
     - short_window_incomplete (是否不足10日): {short_memory.get('short_window_incomplete')}
-    - 主力净流(万): {short_memory.get('smart_net_wan')}
-    - 散户净流(万): {short_memory.get('retail_net_wan')}
     - 当日快照:
       - date (日期): {today.get('date')}
       - rt_price (此刻价格): {today.get('rt_price')}
+      - day_high_low (当日最高/最低): {today.get('day_high_low')}
+      - intraday_position (当前价日内位置): {today.get('intraday_position')}
       - change_rate (当日涨跌幅): {today.get('change_rate')}%
       - bias20 (乖离率，仅观测指标): {today.get('bias20')}%
       - tag_today (当日结构信号): {today.get('tag_today')}
+      - bollinger_position (布林轨位置): {today.get('bb_summary')}
     - 10日压缩画像:
       - max_cum_up_10d_pct (10日累计最大涨幅): {summary_10d.get('max_cum_up_10d_pct')}%
       - max_cum_drop_10d_pct (10日累计最大跌幅): {summary_10d.get('max_cum_drop_10d_pct')}%
@@ -108,38 +188,10 @@ class LLMAnalyst:
       - poc_range_10d (主峰价格区间): {summary_10d.get('poc_range_10d')}
       - poc_ratio_10d_pct (主峰成交量占比): {summary_10d.get('poc_ratio_10d_pct')}%
 
-    【中期趋势（近90日）】
-    - mode (数据完整度): {mid_trend.get('mode')}
-    - window_used (实际可用天数): {mid_trend.get('window_used')}
-    - summary (规则引擎总结): {mid_trend.get('summary')}
-    - peaks (近期波峰序列): {mid_trend.get('peaks')}
-    - troughs (近期波谷序列): {mid_trend.get('troughs')}
+    【多周期趋势与位置】
+{trend_lines}
 
-    请按以下结构输出（Markdown）：
-    1. 核心结论（先给方向，40-80字，必须含量化打分）
-       * 第一行固定格式：`【量化综合做多指数：评级(如★★★★☆) (X/100) - 一句话方向总结】`
-       * “-”右侧的“一句话方向总结”必填，不可省略；示例：`右侧爆发临界点，强烈买入`
-       * `X` 取值 0-100（整数）；`0-39=★`，`40-59=★★`，`60-74=★★★`，`75-89=★★★★`，`90-100=★★★★★`
-       * 第二行用 40-80 字给出方向结论，并解释该分数最关键的 1-2 个驱动因子；需与第一行方向保持一致。
-    2. 基本面与估值透视（中长期推演，250-300字）
-         * 严禁单纯罗列数据，必须穿透财务快照形成定价逻辑。
-         * 【买方四大公理映射】：必须审视标的业务契合了以下哪几条底层公理，并据此定性资产属性（防御型现金奶牛 vs 进攻型高爆发成长）。公理存在权重差异：1.出海与全球化能力(40%，即中外剪刀差：成本RMB化，收益外汇化，这是硬科技公司活下去的首要条件)；2.AI产业层级与关联度(30%，精准定位标的在AI产业链上下游传导的位置，区分是算力基建Tier1/核心模型与强关联组件Tier2/深度赋能Tier3，还是仅仅作为辅助工具的边缘应用Tier4，只有Tier1-3才能享受高赔率期权溢价)；4.老龄化不可逆(20%)；3.物理世界运转效率跃升(10%)。若不符合任何一条，直接给出“不予买入”结论；若同时满足1和2（双核驱动），必须给予极高溢价并大幅上调中长期评分；满足其他组合则适度上调。
-         * 重塑估值锚：对于轻资产科技股（18C等），严禁使用 BPS/PB 评估安全边际，必须使用 PS (市销率)；并通过联网检索全球1-2家最可比公司（优先美股）PS做对标，明确给出“稀缺性溢价”或“严重低估”结论。
-         * 筹码与流动性：直接基于【筹码与流动性档案】中明确的短中长期“主力”与“整体”资金流向数据进行研判，结合【总/流通市值】定性真实的盘口博弈状态（如：主力托底散户抛售、主力出逃散户接盘等），无需主观猜测机构动向。
-    3. 技术面证据链（短期当日信号 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 90日空间位置，200字左右）
-       * 必须解释 tag_today 的量价含义，并结合 bias20、poc_range_10d、poc_ratio_10d_pct、90日空间位置判断该信号处于低位/中位/高位。
-       * 若 tag_today 含"缩量/放量"，必须说明其更接近低位承接、分歧换手还是高位派发风险，并给出明确操作评分：看多 1-5、看空 1-5，以及对应的仓位动作。
-     4. 交易计划（入场条件、止损位、失效条件，100-150字）
-    5. 核心风险/证伪条件（除常规止损外，必须给出1条可导致逻辑瞬间崩塌的非结构化风险触发，如宏观事件/产业政策，40-80字）
-    6. 联网检索证据（固定三行）
-       * 检索时间：YYYY-MM-DD HH:MM（北京时间）
-       * 对标来源域名：至少3个，格式示例 finance.yahoo.com | companiesmarketcap.com | wsj.com
-       * 对标公司与PS时点：公司A(代码) PS=xx（时点）；公司B(代码) PS=yy（时点）
-
-    要求：
-    - 结论必须可交易，禁止空泛表述。
-    - 必须主动寻找“反面逻辑”，禁止只做线性外推（单边看多或单边看空）。
-    - 若样本不足（short_window_incomplete=true 或 mode!=FULL_90），必须显式提示不确定性。"""
+{output_rules}"""
 
     async def _call_llm_with_retry(
         self,
@@ -200,6 +252,7 @@ class LLMAnalyst:
         fundamental_data: Dict[str, Any],
         short_memory: Dict[str, Any],
         mid_trend: Dict[str, Any],
+        prompt_template: Optional[str] = None,
     ) -> str:
         """Build US-market LLM prompt (Futu data source, tech-stock focused)."""
         today = short_memory.get("today", {}) or {}
@@ -209,6 +262,8 @@ class LLMAnalyst:
             drawdown_10d_fmt = f"-{abs(float(drawdown_raw))}%"
         except Exception:
             drawdown_10d_fmt = "无数据"
+        trend_lines = self._format_multi_window_trend_lines(mid_trend)
+        output_rules = self._get_prompt_output_rules("us_single_stock", prompt_template)
         return f"""你是美股量化深度分析师。请基于下面结构化数据生成单股研报。
     【报告时间】
     {current_time}
@@ -244,9 +299,12 @@ class LLMAnalyst:
     - 当日快照:
       - date (日期): {today.get('date')}
       - rt_price (此刻价格): {today.get('rt_price')}
+      - day_high_low (当日最高/最低): {today.get('day_high_low')}
+      - intraday_position (当前价日内位置): {today.get('intraday_position')}
       - change_rate (当日涨跌幅): {today.get('change_rate')}%
       - bias20 (乖离率): {today.get('bias20')}%
       - tag_today (当日结构信号): {today.get('tag_today')}
+      - bollinger_position (布林轨位置): {today.get('bb_summary')}
     - 10日压缩画像:
       - max_cum_up_10d_pct (10日累计最大涨幅): {summary_10d.get('max_cum_up_10d_pct')}%
       - max_cum_drop_10d_pct (10日累计最大跌幅): {summary_10d.get('max_cum_drop_10d_pct')}%
@@ -255,38 +313,10 @@ class LLMAnalyst:
       - poc_range_10d (主峰价格区间): {summary_10d.get('poc_range_10d')}
       - poc_ratio_10d_pct (主峰成交量占比): {summary_10d.get('poc_ratio_10d_pct')}%
 
-    【中期趋势（近90日）】
-    - mode (数据完整度): {mid_trend.get('mode')}
-    - window_used (实际可用天数): {mid_trend.get('window_used')}
-    - summary (规则引擎总结): {mid_trend.get('summary')}
-    - peaks (近期波峰序列): {mid_trend.get('peaks')}
-    - troughs (近期波谷序列): {mid_trend.get('troughs')}
+    【多周期趋势与位置】
+{trend_lines}
 
-    请按以下结构输出（Markdown）：
-    1. 核心结论（先给方向，40-80字，必须含量化打分）
-       * 第一行固定格式：`【量化综合做多指数：评级(如★★★★☆) (X/100) - 一句话方向总结】`
-       * "-"右侧的"一句话方向总结"必填，不可省略；示例：`右侧爆发临界点，强烈买入`
-       * `X` 取值 0-100（整数）；`0-39=★`，`40-59=★★`，`60-74=★★★`，`75-89=★★★★`，`90-100=★★★★★`
-       * 第二行用 40-80 字给出方向结论，并解释该分数最关键的 1-2 个驱动因子；需与第一行方向保持一致。
-    2. 基本面与估值透视（中长期推演，250-300字）
-       * 严禁单纯罗列数据，必须穿透财务快照形成定价逻辑。
-       * 【买方三大公理映射】：审视标的契合哪几条底层公理。公理权重：1.行业潜力与增长度(40%，所在赛道是否处于高成长阶段、市场空间有多大，公司占市场份额大概有多少)；2.AI产业层级与关联度(40%，精准定位标的在AI产业链上下游传导的位置，算力基建Tier1/核心模型与强关联组件Tier2/深度赋能Tier3/边缘辅助应用Tier4，只有Tier1-3才能享受高赔率期权溢价)；3.物理世界运转效率跃升(20%，降本增效的直接受益者)。若不符合任何一条，直接给出"不予买入"结论；若同时满足1和2（双核驱动），给予极高溢价并大幅上调中长期评分。
-       * 重塑估值锚：轻资产科技股必须用 PS(市销率)评估，联网检索全球1-2家最可比美股公司 PS 做对标，明确给出"稀缺性溢价"或"严重低估"结论。
-       * 筹码与流动性：直接基于【筹码与流动性档案】中明确的短中长期"主力"与"整体"资金流向数据进行研判，结合【总/流通市值】定性真实的盘口博弈状态，无需主观猜测机构动向。
-    3. 技术面证据链（短期当日信号 + bias20 + 10日风险收益 + 10日POC/筹码分布 + 90日空间位置，200字左右）
-       * 必须解释 tag_today 的量价含义，并结合 bias20、poc_range_10d、poc_ratio_10d_pct、90日空间位置判断该信号处于低位/中位/高位。
-       * 若 tag_today 含“缩量/放量”，必须说明其更接近低位承接、分歧换手还是高位派发风险，并给出明确操作评分：看多 1-5、看空 1-5，以及对应的仓位动作。
-    4. 交易计划（入场条件、止损位、失效条件，100-150字）
-    5. 核心风险/证伪条件（除常规止损外，必须给出1条可导致逻辑瞬间崩塌的非结构化风险触发，如宏观事件/产业政策，40-80字）
-    6. 联网检索证据（固定三行）
-       * 检索时间：YYYY-MM-DD HH:MM（北京时间）
-       * 对标来源域名：至少3个，格式示例 finance.yahoo.com | companiesmarketcap.com | wsj.com
-       * 对标公司与PS时点：公司A(代码) PS=xx（时点）；公司B(代码) PS=yy（时点）
-
-    要求：
-    - 结论必须可交易，禁止空泛表述。
-    - 必须主动寻找"反面逻辑"，禁止只做线性外推（单边看多或单边看空）。
-    - 若样本不足（short_window_incomplete=true 或 mode!=FULL_90），必须显式提示不确定性。"""
+{output_rules}"""
 
     @staticmethod
     def _parse_us_symbol(symbol_input: str) -> Optional[str]:
@@ -361,10 +391,10 @@ class LLMAnalyst:
             klines_df = await asyncio.to_thread(
                 futu_client.get_historical_klines,
                 futu_symbol,
-                max(lookback_days_mid + 30, 120),
+                max(lookback_days_mid + 60, 240),
             )
             if klines_df is None or klines_df.empty:
-                msg = f"未获取到 {futu_symbol} 历史K线数据，无法生成短中期分析。"
+                msg = f"未获取到 {futu_symbol} 历史K线数据，无法生成短期与多周期分析。"
                 logger.warning(f"[Gemini/USSingleStock] {msg}")
                 return {"ok": False, "symbol": futu_symbol, "title": None, "report": None, "error": msg}
 
@@ -400,7 +430,7 @@ class LLMAnalyst:
 
 ---
 
-📊 **数据窗口**：短期{lookback_days_short}天 | 中期{lookback_days_mid}天
+📊 **数据窗口**：短期{lookback_days_short}天 | 多周期30/90/180天
 🔔 **触发类型**：{trigger_type}
 🧠 **AI模型**：{self.us_model}"""
 
@@ -463,26 +493,35 @@ class LLMAnalyst:
             klines_df = await asyncio.to_thread(
                 futu_client.get_hk_historical_klines,
                 standard_symbol,
-                max(lookback_days_mid + 30, 120),
+                max(lookback_days_mid + 60, 240),
             )
-            if klines_df is None or klines_df.empty:
-                msg = f"未获取到 {standard_symbol} 历史K线数据，无法生成短中期分析。"
+            if not isinstance(klines_df, pd.DataFrame) or klines_df.empty:
+                msg = f"未获取到 {standard_symbol} 历史K线数据，无法生成短期与多周期分析。"
                 logger.warning(f"[Gemini/SingleStock] {msg}")
                 return {"ok": False, "symbol": standard_symbol, "title": None, "report": None, "error": msg}
+            hk_klines_df: pd.DataFrame = klines_df
 
             from src.analysis.futu_math_indicator import (
                 build_short_term_memory,
                 build_mid_term_trend,
                 build_hk_fundamental_data,
             )
-            short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
-            mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
+            short_memory = build_short_term_memory(hk_klines_df, stock, capital_data, lookback_days_short)
+            mid_trend = build_mid_term_trend(hk_klines_df, price, lookback_days_mid)
             fundamental_data = await asyncio.to_thread(
                 build_hk_fundamental_data,
                 standard_symbol,
                 stock,
                 (5, 10, 90),
+                hk_klines_df,
             )
+            try:
+                fundamental_data["revenue_disclosure_profile"] = await longport_client.get_revenue_disclosure_profile(
+                    standard_symbol
+                )
+            except Exception as e:
+                logger.warning(f"[Gemini/SingleStock] Longbridge revenue profile unavailable for {standard_symbol}: {e}")
+                fundamental_data["revenue_disclosure_profile"] = "长桥营收披露数据暂不可用"
             prompt = self._build_single_stock_prompt(
                 symbol_for_prompt,
                 current_time,
@@ -506,7 +545,7 @@ class LLMAnalyst:
 
 ---
 
-📊 **数据窗口**：短期{lookback_days_short}天 | 中期{lookback_days_mid}天
+📊 **数据窗口**：短期{lookback_days_short}天 | 多周期30/90/180天
 🔔 **触发类型**：{trigger_type}
 🧠 **AI模型**：{self.us_model}"""
 

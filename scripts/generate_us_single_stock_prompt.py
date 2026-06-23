@@ -15,6 +15,7 @@ import argparse
 import os
 import sys
 from datetime import datetime
+from typing import Optional
 
 os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
 
@@ -82,6 +83,7 @@ def generate_us_prompt_file(
     output_dir: str,
     lookback_days_short: int = 10,
     lookback_days_mid: int = 90,
+    prompt_template: Optional[str] = None,
 ) -> str:
     analyst = LLMAnalyst()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -139,6 +141,7 @@ def generate_us_prompt_file(
         fundamental_data,
         short_memory,
         mid_trend,
+        prompt_template=prompt_template,
     )
 
     # --- 6. Write to file ---
@@ -171,6 +174,11 @@ def main() -> None:
     )
     parser.add_argument("--short", type=int, default=10, help="短期窗口天数，默认 10")
     parser.add_argument("--mid", type=int, default=90, help="中期窗口天数，默认 90")
+    parser.add_argument(
+        "--prompt-template",
+        default=None,
+        help="指定 config/prompt_templates.yaml 中 us_single_stock.templates 的版本名；默认使用 active",
+    )
     args = parser.parse_args()
 
     try:
@@ -179,6 +187,7 @@ def main() -> None:
             output_dir=args.output_dir,
             lookback_days_short=args.short,
             lookback_days_mid=args.mid,
+            prompt_template=args.prompt_template,
         )
         print(f"[OK] Prompt 已写入: {output_file}")
     finally:

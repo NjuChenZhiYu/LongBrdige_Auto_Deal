@@ -1,7 +1,11 @@
-import pandas as pd
-import numpy as np
-from typing import Optional, Dict, List, Any
+import json
 import logging
+import os
+import re
+from datetime import date
+from typing import Optional, Dict, List, Any, cast
+
+import pandas as pd
 from src.analysis.single_stock_math_calculate import (
     _build_short_window_price_distribute as common_build_short_window_price_distribute,
     _calculate_max_contiguous_drop_pct as common_calculate_max_contiguous_drop_pct,
@@ -17,13 +21,19 @@ from src.analysis.single_stock_math_calculate import (
 from src.analysis.single_stock_feature_builder import (
     calculate_tag_today_by_derivatives as common_calculate_tag_today_by_derivatives,
     build_current_day_indicator as common_build_current_day_indicator,
+    build_liquidity_profiles as common_build_liquidity_profiles,
     empty_short_term_payload as common_empty_short_term_payload,
+    build_multi_window_trends as common_build_multi_window_trends,
     build_mid_trade_features as common_build_mid_trade_features,
     prepare_short_term_dataset as common_prepare_short_term_dataset,
     build_short_window_indicator as common_build_short_window_indicator,
 )
 
 logger = logging.getLogger(__name__)
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_SHAREHOLDER_CACHE_DIR = os.path.join(_PROJECT_ROOT, "tmp", "shareholder_cache")
+_SHAREHOLDER_CACHE_VERSION = 1
 
 # Backward-compatible re-exports for callers that still import from this module.
 calculate_ema_derivatives = common_calculate_ema_derivatives
@@ -96,6 +106,7 @@ def build_short_term_memory(
         stock_snapshot=stock_snapshot,
         date_col=date_col,
         latest_tag=latest_tag,
+        technical_result=_ema_result,
         safe_float_fn=common_safe_float,
         use_realtime_price=use_realtime_price,
     )
@@ -174,6 +185,226 @@ def calculate_hk_capital_flow_profiles(
     max_window = max(windows) if windows else 90
     flow_df = futu_client.get_capital_flow_history(symbol, window_days=max(max_window, 90))
     return {w: _aggregate_hk_capital_flow_from_df(flow_df, window_days=w) for w in windows}
+
+
+def _period_sort_key(period_text: Any) -> tuple:
+    text = str(period_text or "").strip()
+    match = re.search(r"(\d{4})\s*/?\s*Q([1-4])", text, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    match = re.search(r"(\d{4})[-/](\d{1,2})", text)
+    if match:
+        month = int(match.group(2))
+        return int(match.group(1)), (month - 1) // 3 + 1
+    return 0, 0
+
+
+def _latest_period_df(df: Optional[pd.DataFrame], period_col: str = "period_text") -> Optional[pd.DataFrame]:
+    if df is None or df.empty or period_col not in df.columns:
+        return None
+
+    d = df.copy()
+    d["_period_key"] = d[period_col].map(_period_sort_key)
+    latest_key = max(d["_period_key"].tolist())
+    if latest_key == (0, 0):
+        latest_period = str(d[period_col].dropna().iloc[0]) if not d[period_col].dropna().empty else ""
+        result = d.loc[d[period_col].astype(str) == latest_period].drop(columns=["_period_key"], errors="ignore")
+        return cast(pd.DataFrame, result)
+    result = d.loc[d["_period_key"] == latest_key].drop(columns=["_period_key"], errors="ignore")
+    return cast(pd.DataFrame, result)
+
+
+def _fmt_signed_num(value: Any, digits: int = 2, suffix: str = "") -> str:
+    if value is None:
+        return "无数据"
+    try:
+        val = float(value)
+        if pd.isna(val):
+            return "无数据"
+    except Exception:
+        return "无数据"
+    sign = "+" if val > 0 else ""
+    if digits == 0:
+        return f"{sign}{int(round(val))}{suffix}"
+    return f"{sign}{round(val, digits)}{suffix}"
+
+
+def _fmt_shares_compact(value: Any, signed: bool = False) -> str:
+    if value is None:
+        return "无数据"
+    try:
+        val = float(value)
+        if pd.isna(val):
+            return "无数据"
+    except Exception:
+        return "无数据"
+
+    sign = "+" if signed and val > 0 else ""
+    abs_val = abs(val)
+    if abs_val >= 1_0000_0000:
+        return f"{sign}{round(val / 1_0000_0000.0, 2)}亿股"
+    if abs_val >= 1_0000:
+        return f"{sign}{round(val / 1_0000.0, 2)}万股"
+    return f"{sign}{int(round(val))}股"
+
+
+def _shareholder_cache_path(symbol: str, cache_date: Optional[date] = None) -> str:
+    cache_date = cache_date or date.today()
+    symbol_key = re.sub(r"[^A-Za-z0-9_]+", "_", str(symbol or "").upper()).strip("_") or "UNKNOWN"
+    return os.path.join(_SHAREHOLDER_CACHE_DIR, f"{cache_date.strftime('%Y%m%d')}_{symbol_key}.json")
+
+
+def _read_shareholder_cache(symbol: str) -> Dict[str, str]:
+    path = _shareholder_cache_path(symbol)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            return {}
+        if payload.get("version") != _SHAREHOLDER_CACHE_VERSION:
+            return {}
+        if payload.get("cache_date") != date.today().isoformat():
+            return {}
+        profiles = payload.get("profiles")
+        return profiles if isinstance(profiles, dict) else {}
+    except Exception as e:
+        logger.warning(f"[SingleStock/ShareholderCache] Failed to read cache for {symbol}: {e}")
+        return {}
+
+
+def _write_shareholder_cache(symbol: str, updates: Dict[str, str]) -> None:
+    if not updates:
+        return
+    try:
+        os.makedirs(_SHAREHOLDER_CACHE_DIR, exist_ok=True)
+        path = _shareholder_cache_path(symbol)
+        profiles = _read_shareholder_cache(symbol)
+        profiles.update({k: v for k, v in updates.items() if isinstance(v, str) and v.strip()})
+        payload = {
+            "version": _SHAREHOLDER_CACHE_VERSION,
+            "cache_date": date.today().isoformat(),
+            "symbol": str(symbol or "").upper(),
+            "profiles": profiles,
+        }
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
+    except Exception as e:
+        logger.warning(f"[SingleStock/ShareholderCache] Failed to write cache for {symbol}: {e}")
+
+
+def build_institutional_holding_profile(symbol: str) -> str:
+    """
+    Compress institutional holding history into the latest reporting-period summary.
+    """
+    from src.api.futu.client import futu_client
+
+    cache_key = "institutional_holding_profile"
+    cached = _read_shareholder_cache(symbol).get(cache_key)
+    if cached:
+        logger.info(f"[SingleStock/ShareholderCache] Hit {cache_key} for {symbol}")
+        return cached
+
+    try:
+        quote_ctx = futu_client.get_quote_context()
+        if not hasattr(quote_ctx, "get_shareholders_institutional"):
+            return "当前 Futu SDK 未暴露 get_shareholders_institutional，需升级 futu-api/Futu OpenD 后再验证数据权限。"
+
+        df = futu_client.get_shareholders_institutional(symbol, num=10)
+        latest_df = _latest_period_df(df)
+        if latest_df is None or latest_df.empty:
+            return "无数据"
+
+        row = latest_df.iloc[0]
+        period_text = row.get("period_text", "未知报告期")
+        institution_quantity = row.get("institution_quantity")
+        institution_quantity_change = row.get("institution_quantity_change")
+        holder_quantity = row.get("holder_quantity")
+        holder_quantity_change = row.get("holder_quantity_change")
+        holder_pct = row.get("holder_pct")
+        holder_pct_change = row.get("holder_pct_change")
+
+        profile = (
+            f"最新报告期{period_text}：机构{_fmt_signed_num(institution_quantity, digits=0).lstrip('+')}家"
+            f"（较上期{_fmt_signed_num(institution_quantity_change, digits=0)}家），"
+            f"持股{_fmt_shares_compact(holder_quantity)}"
+            f"（较上期{_fmt_shares_compact(holder_quantity_change, signed=True)}），"
+            f"持股比例{_fmt_signed_num(holder_pct, digits=3).lstrip('+')}%"
+            f"（较上期{_fmt_signed_num(holder_pct_change, digits=3)}pct）。"
+        )
+        _write_shareholder_cache(symbol, {cache_key: profile})
+        return profile
+    except Exception as e:
+        logger.warning(f"[SingleStock/InstitutionalHolding] Failed to build profile for {symbol}: {e}")
+        return "无数据"
+
+
+def build_shareholder_holding_change_profile(symbol: str, top_n: int = 3) -> str:
+    """
+    Keep only the latest reporting period and the most meaningful holder changes.
+    """
+    from src.api.futu.client import futu_client
+
+    cache_key = "shareholder_holding_change_profile"
+    cached = _read_shareholder_cache(symbol).get(cache_key)
+    if cached:
+        logger.info(f"[SingleStock/ShareholderCache] Hit {cache_key} for {symbol}")
+        return cached
+
+    def _fmt_holder_change(row: pd.Series) -> str:
+        name = str(row.get("name") or "未知股东").strip()
+        shares = _fmt_shares_compact(row.get("share_change_num"), signed=True)
+        ratio_change = _fmt_signed_num(row.get("share_ratio_change"), digits=3, suffix="pct")
+        share_ratio = _fmt_signed_num(row.get("share_ratio"), digits=3).lstrip("+")
+        return f"{name} {shares}/{ratio_change}（持股{share_ratio}%）"
+
+    try:
+        quote_ctx = futu_client.get_quote_context()
+        if not hasattr(quote_ctx, "get_shareholders_holding_changes"):
+            return "当前 Futu SDK 未暴露 get_shareholders_holding_changes，需升级 futu-api/Futu OpenD 后再验证数据权限。"
+
+        df = futu_client.get_shareholders_holding_changes(symbol, num=50)
+        latest_df = _latest_period_df(df)
+        if latest_df is None or latest_df.empty:
+            return "无数据"
+
+        period_text = str(latest_df.iloc[0].get("period_text") or "未知报告期")
+        d = latest_df.copy()
+        for col in ("share_ratio_change", "share_change_num"):
+            if col in d.columns:
+                d[col] = pd.to_numeric(d[col], errors="coerce")
+            else:
+                d[col] = 0.0
+
+        meaningful = d[
+            (d["share_ratio_change"].abs() >= 0.02)
+            | (d["share_change_num"].abs() >= 10_000)
+        ].copy()
+        if meaningful.empty:
+            profile = f"最新报告期{period_text}：无显著股东持仓变动。"
+            _write_shareholder_cache(symbol, {cache_key: profile})
+            return profile
+
+        increases = cast(pd.DataFrame, meaningful.loc[meaningful["share_ratio_change"] > 0]).sort_values(
+            by=["share_ratio_change", "share_change_num"],
+            ascending=[False, False],
+        ).head(top_n)
+        decreases = cast(pd.DataFrame, meaningful.loc[meaningful["share_ratio_change"] < 0]).sort_values(
+            by=["share_ratio_change", "share_change_num"],
+            ascending=[True, True],
+        ).head(top_n)
+
+        increase_text = "；".join(_fmt_holder_change(row) for _, row in increases.iterrows()) or "无显著增持"
+        decrease_text = "；".join(_fmt_holder_change(row) for _, row in decreases.iterrows()) or "无显著减持"
+        profile = f"最新报告期{period_text}：增持Top{top_n}：{increase_text}；减持Top{top_n}：{decrease_text}。"
+        _write_shareholder_cache(symbol, {cache_key: profile})
+        return profile
+    except Exception as e:
+        logger.warning(f"[SingleStock/HolderChanges] Failed to build profile for {symbol}: {e}")
+        return "无数据"
 
 def hk_basic_finance_data(
     stock_snapshot: Dict[str, Any],
@@ -323,6 +554,7 @@ def build_hk_fundamental_data(
     symbol: str,
     base_snapshot: Optional[Dict[str, Any]] = None,
     flow_windows: Optional[tuple] = (5, 10, 90),
+    klines_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """
     单股基本面构建统一入口：
@@ -330,6 +562,7 @@ def build_hk_fundamental_data(
     2) 拉取完整快照（补全 get_special_quotes 的裁剪字段）
     3) 聚合多窗口资金流（5/10/90 日，T-1 历史锚）
     4) 拼接今日盘中实时资金（get_today_capital_flow）
+    5) 如传入 K 线，计算成交额/换手率 20/60/180 流动性画像
     """
     from src.api.futu.client import futu_client
 
@@ -362,6 +595,9 @@ def build_hk_fundamental_data(
     )
     fundamental_data["plate_info"] = plate_info
     fundamental_data.update(get_today_capital_flow(symbol))
+    fundamental_data.update(common_build_liquidity_profiles(klines_df, finance_snapshot))
+    fundamental_data["institutional_holding_profile"] = build_institutional_holding_profile(symbol)
+    fundamental_data["shareholder_holding_change_profile"] = build_shareholder_holding_change_profile(symbol)
     return fundamental_data
 
 
@@ -370,90 +606,27 @@ def build_mid_term_trend(
     current_price: float,
     lookback_days_mid: int = 90
 ) -> Dict[str, Any]:
-    """Build shape-first mid-term trend summary with sample-size fallback."""
-    default = {
-        "mode": "INSUFFICIENT_LT30",
-        "window_used": 0,
-        "summary": "趋势样本不足，仅可参考实时快照。",
-        "shape": "数据不足",
-        "position_pct": 0.0,
-        "peaks": [],
-        "troughs": [],
-        "poc_range": [0.0, 0.0],
-        "poc_ratio_pct": 0.0,
-    }
-    if klines_df is None or klines_df.empty:
-        return default
-
-    d = klines_df.copy()
-    if "time_key" in d.columns:
-        d = d.sort_values("time_key")
-    for col in ("close", "high", "low"):
-        if col in d.columns:
-            d[col] = pd.to_numeric(d[col], errors="coerce")
-    d = d.dropna(subset=["close"])
-    if d.empty:
-        return default
-
-    d = d.tail(min(lookback_days_mid, len(d))).copy()
-    if d.empty:
-        return default
-
-    # 融合实时价格到中期窗口末端，用于更新形态位置与波动判断。
-    d_current = d.copy()
-    latest_row = d_current.iloc[-1].copy()
-    rt_price = float(current_price) if current_price and current_price > 0 else float(d_current["close"].iloc[-1])
-    latest_row["close"] = rt_price
-    if "high" in d_current.columns:
-        latest_row["high"] = max(float(latest_row.get("high", rt_price)), rt_price)
-    if "low" in d_current.columns:
-        latest_row["low"] = min(float(latest_row.get("low", rt_price)), rt_price)
-    if "time_key" in d_current.columns:
-        latest_row["time_key"] = common_format_rt_time_label(latest_row.get("time_key"))
-    d_current.loc[len(d_current)] = latest_row
-
-    used = len(d_current)
-    mid_features = common_build_mid_trade_features(d_current, lookback_days_mid=lookback_days_mid)
-    poc = common_calc_poc(d_current, lookback_days_mid=lookback_days_mid, bins=10)
-
-    close = d_current["close"]
-    returns = close.pct_change().dropna()
-    vol_pct = float(returns.std() * np.sqrt(252) * 100.0) if not returns.empty else 0.0
-    if vol_pct >= 45:
-        vol_state = "高波动"
-    elif vol_pct >= 25:
-        vol_state = "中波动"
-    else:
-        vol_state = "低波动/压缩"
-
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    dif = ema12 - ema26
-    dea = dif.ewm(span=9, adjust=False).mean()
-    sign = np.sign((dif - dea).fillna(0.0).to_numpy())
-    macd_cross = int(np.sum(sign[1:] * sign[:-1] < 0)) if len(sign) > 1 else 0
-
-    base_used = len(d)
-    mode = "FULL_90" if base_used >= lookback_days_mid else ("REDUCED_30_89" if base_used >= 30 else "INSUFFICIENT_LT30")
-    if mode == "FULL_90":
-        summary = (
-            f"近{base_used}日形态为{mid_features['shape']}，已融合实时价格，当前位于90日空间{mid_features['position_pct']}%，"
-            f"POC区间{poc['poc_range'][0]}-{poc['poc_range'][1]}（占比{poc['poc_ratio_pct']}%）。"
-        )
-    elif mode == "REDUCED_30_89":
-        summary = (
-            f"中期样本不足90日（实际{base_used}日），采用压缩版规则并融合实时价格。形态倾向{mid_features['shape']}，"
-            f"MACD交叉{macd_cross}次，波动状态{vol_state}。"
-        )
-    else:
-        summary = (
-            f"可用历史仅{base_used}日（已融合实时价格），中期趋势样本不足，谨慎解读。"
-        )
-
+    """Build multi-window trend summary while preserving the legacy 90-day keys."""
+    windows = (30, lookback_days_mid, 180)
+    window_trends = common_build_multi_window_trends(klines_df, current_price, windows=windows)
+    primary = next(
+        (item for item in window_trends if item.get("window_days") == int(lookback_days_mid)),
+        window_trends[0] if window_trends else {},
+    )
     return {
-        "mode": mode,
-        "window_used": int(base_used),
-        "summary": summary,
-        "peaks": mid_features.get("peaks", []),
-        "troughs": mid_features.get("troughs", []),
+        "mode": primary.get("mode", "INSUFFICIENT"),
+        "window_used": primary.get("window_used", 0),
+        "summary": primary.get("summary", "趋势样本不足，仅可参考实时快照。"),
+        "shape": primary.get("shape", "数据不足"),
+        "position_pct": primary.get("position_pct", 0.0),
+        "peaks": primary.get("peaks", []),
+        "troughs": primary.get("troughs", []),
+        "window_high": primary.get("window_high", 0.0),
+        "window_low": primary.get("window_low", 0.0),
+        "top_highs": primary.get("top_highs", []),
+        "bottom_lows": primary.get("bottom_lows", []),
+        "poc_range": primary.get("poc_range", [0.0, 0.0]),
+        "poc_ratio_pct": primary.get("poc_ratio_pct", 0.0),
+        "volatility_pct": primary.get("volatility_pct", 0.0),
+        "window_trends": window_trends,
     }

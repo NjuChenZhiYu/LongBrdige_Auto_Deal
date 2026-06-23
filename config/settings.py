@@ -58,6 +58,7 @@ class Settings:
     # Load symbols from yaml if available
     LONGPORT_SYMBOLS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "longport_symbols.yaml")
     FUTU_SYMBOLS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "futu_symbols.yaml")
+    PROMPT_TEMPLATES_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompt_templates.yaml")
     
     LONGPORT_SYMBOLS_CONFIG = {}
     FUTU_SYMBOLS_CONFIG = {}
@@ -139,12 +140,28 @@ class Settings:
         VOLUME_EXPAND_SHORT_EMA5_THRESHOLD = 1.5
 
     try:
+        VOLUME_EXPAND_LONG_EMA20_EXTREME_THRESHOLD = float(_yaml_thresholds.get(
+            'volume_expand_long_ema20_extreme',
+            os.getenv("VOLUME_EXPAND_LONG_EMA20_EXTREME_THRESHOLD", "2.0")
+        ))
+    except ValueError:
+        VOLUME_EXPAND_LONG_EMA20_EXTREME_THRESHOLD = 2.0
+
+    try:
         VOLUME_SHRINK_SHORT_EMA5_THRESHOLD = float(_yaml_thresholds.get(
             'volume_shrink_short_ema5',
             os.getenv("VOLUME_SHRINK_SHORT_EMA5_THRESHOLD", "0.6")
         ))
     except ValueError:
         VOLUME_SHRINK_SHORT_EMA5_THRESHOLD = 0.6
+
+    try:
+        VOLUME_SHRINK_LONG_EMA20_EXTREME_THRESHOLD = float(_yaml_thresholds.get(
+            'volume_shrink_long_ema20_extreme',
+            os.getenv("VOLUME_SHRINK_LONG_EMA20_EXTREME_THRESHOLD", "0.4")
+        ))
+    except ValueError:
+        VOLUME_SHRINK_LONG_EMA20_EXTREME_THRESHOLD = 0.4
 
     # Futu Configuration
     FUTU_HOST = os.getenv("FUTU_HOST", "127.0.0.1")

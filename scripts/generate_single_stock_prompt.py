@@ -1,7 +1,11 @@
 import argparse
+import asyncio
 import os
 import sys
 from datetime import datetime
+from typing import Optional
+
+import pandas as pd
 
 # Futu 在部分 Python/Protobuf 组合下会触发 pb2 描述符兼容错误。
 # 仅对本脚本启用 pure-python protobuf 解析，避免全局环境改动。
@@ -12,6 +16,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from src.api.futu.client import futu_client
+from src.api.longport.client import longport_client
 from src.analysis.futu_math_indicator import (
     build_hk_fundamental_data,
     build_mid_term_trend,
@@ -25,6 +30,7 @@ def generate_prompt_file(
     output_dir: str,
     lookback_days_short: int = 10,
     lookback_days_mid: int = 90,
+    prompt_template: Optional[str] = None,
 ) -> str:
     analyst = LLMAnalyst()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -43,14 +49,18 @@ def generate_prompt_file(
     stock_name = str(stock.get("name", "") or "").strip()
     symbol_for_prompt = f"{standard_symbol} {stock_name}" if stock_name else standard_symbol
 
-    capital_data = futu_client.get_capital_flow(standard_symbol)
+    raw_capital_data = futu_client.get_capital_flow(standard_symbol)
+    capital_data = raw_capital_data if isinstance(raw_capital_data, pd.DataFrame) else None
 
-    klines_df = futu_client.get_hk_historical_klines(
+    max_trend_window = max(30, lookback_days_mid, 180)
+    kline_days = max(max_trend_window + 60, 240)
+    raw_klines_df = futu_client.get_hk_historical_klines(
         standard_symbol,
-        max(lookback_days_mid + 30, 120),
+        kline_days,
     )
-    if klines_df is None or klines_df.empty:
+    if not isinstance(raw_klines_df, pd.DataFrame) or raw_klines_df.empty:
         raise RuntimeError(f"未获取到 {standard_symbol} 历史K线数据，无法生成 prompt。")
+    klines_df = raw_klines_df
 
     short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
     mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
@@ -58,7 +68,16 @@ def generate_prompt_file(
         standard_symbol,
         stock,
         (5, 10, 90),
+        klines_df,
     )
+    #print(f"[INFO] 机构持仓趋势: {fundamental_data.get('institutional_holding_profile', '无数据')}")
+    #print(f"[INFO] 股东持仓变动: {fundamental_data.get('shareholder_holding_change_profile', '无数据')}")
+    try:
+        fundamental_data["revenue_disclosure_profile"] = asyncio.run(
+            longport_client.get_revenue_disclosure_profile(standard_symbol)
+        )
+    except Exception as e:
+        fundamental_data["revenue_disclosure_profile"] = f"长桥营收披露数据暂不可用（{e}）"
 
     prompt = analyst._build_single_stock_prompt(
         symbol_for_prompt,
@@ -66,6 +85,7 @@ def generate_prompt_file(
         fundamental_data,
         short_memory,
         mid_trend,
+        prompt_template=prompt_template,
     )
 
     os.makedirs(output_dir, exist_ok=True)
@@ -80,7 +100,7 @@ def generate_prompt_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="根据股票代码生成 _build_single_stock_prompt 的原始 prompt 并落盘。"
+        description="根据股票代码生成 _build_single_stock_prompt 的原始 prompt 并落盘，包含30/mid/180日窗口、机构持仓与股东持仓变动摘要。"
     )
     parser.add_argument("symbol", help="股票代码，例如 09880 / HK.09880")
     parser.add_argument(
@@ -89,7 +109,17 @@ def main() -> None:
         help="输出目录（默认: tmp/stock_promt_storage）",
     )
     parser.add_argument("--short", type=int, default=10, help="短期窗口天数，默认 10")
-    parser.add_argument("--mid", type=int, default=90, help="中期窗口天数，默认 90")
+    parser.add_argument(
+        "--mid",
+        type=int,
+        default=90,
+        help="多周期核心窗口天数，默认 90；脚本固定同时生成 30/mid/180 日窗口",
+    )
+    parser.add_argument(
+        "--prompt-template",
+        default=None,
+        help="指定 config/prompt_templates.yaml 中 hk_single_stock.templates 的版本名；默认使用 active",
+    )
     args = parser.parse_args()
 
     try:
@@ -98,6 +128,7 @@ def main() -> None:
             output_dir=args.output_dir,
             lookback_days_short=args.short,
             lookback_days_mid=args.mid,
+            prompt_template=args.prompt_template,
         )
         print(f"[OK] Prompt 已写入: {output_file}")
     finally:
