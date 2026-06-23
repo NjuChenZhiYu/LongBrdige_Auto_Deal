@@ -94,7 +94,7 @@ def calculate_ema_derivatives(
         tag_combined   : tag + volume_regime 二次研判（§3.3）；中性量能时等于 tag
         v5 / v20 / a5  : EMA 一阶/二阶导数（%）
         bias20         : 乖离率，仅观测，不参与标签决策
-        volume_regime  : 放量 / 中性 / 缩量（双确认或短期极端阈值，见文档 §2.5.3）
+        volume_regime  : 放量 / 中性 / 缩量（双确认或短/中期极端阈值，见文档 §2.5.3）
         volume_ratio_target_ema5  : V_target / V_ema5
         volume_ratio_target_ema20 : V_target / V_ema20
         volume_ratio_ema5_ema20   : V_ema5 / V_ema20
@@ -173,13 +173,19 @@ def calculate_ema_derivatives(
                 is_expand_short_extreme = (
                     raw_r_target_ema5 >= Settings.VOLUME_EXPAND_SHORT_EMA5_THRESHOLD
                 )
+                is_expand_long_extreme = (
+                    raw_r_target_ema20 >= Settings.VOLUME_EXPAND_LONG_EMA20_EXTREME_THRESHOLD
+                )
                 is_shrink_short_extreme = (
                     raw_r_target_ema5 <= Settings.VOLUME_SHRINK_SHORT_EMA5_THRESHOLD
                 )
+                is_shrink_long_extreme = (
+                    raw_r_target_ema20 <= Settings.VOLUME_SHRINK_LONG_EMA20_EXTREME_THRESHOLD
+                )
 
-                if is_expand_double_confirm or is_expand_short_extreme:
+                if is_expand_double_confirm or is_expand_short_extreme or is_expand_long_extreme:
                     volume_regime = "放量"
-                elif is_shrink_double_confirm or is_shrink_short_extreme:
+                elif is_shrink_double_confirm or is_shrink_short_extreme or is_shrink_long_extreme:
                     volume_regime = "缩量"
 
     # --- EMA 衍生指标（含当日实时价格）---
@@ -205,7 +211,7 @@ def calculate_ema_derivatives(
     if v20 > 0 and v5 > 0 and a5 > 0:
         tag = "【主升浪加速：长短共振】"
     elif v20 > 0 and v5 > 0 and a5 < 0:
-        tag = "【主升浪降速：高位震荡/诱多】"
+        tag = "【上行降速：短线分歧/追高风险】"
     elif v20 < 0 and v5 < 0 and a5 < 0:
         tag = "【主跌浪加速：空头长短共振】"
     elif v20 < 0 and v5 < 0 and a5 > 0:
@@ -219,8 +225,8 @@ def calculate_ema_derivatives(
     _TV_MAP: dict[tuple[str, str], str] = {
         ("【主升浪加速：长短共振】",       "放量"): "【主升浪加速：长短共振】+【放量】✅ 突破有效性较高，资金承接增强 → 顺势跟踪，避免脱离位置追高",
         ("【主升浪加速：长短共振】",       "缩量"): "【主升浪加速：长短共振】+【缩量】✅ 惜售加速特征，抛压较轻 → 持有观察，关注后续是否补量",
-        ("【主升浪降速：高位震荡/诱多】",  "放量"): "【主升浪降速：高位震荡/诱多】+【放量】❌ 派发风险增强，需看位置和资金方向 → 高位主力流出则减仓/清仓，主力流入则减仓观察",
-        ("【主升浪降速：高位震荡/诱多】",  "缩量"): "【主升浪降速：高位震荡/诱多】+【缩量】⚠️ 强势整理/回调洗筹特征，抛压不重 → 持有观察，接近支撑且主力未流出可低吸",
+        ("【上行降速：短线分歧/追高风险】", "放量"): "【上行降速：短线分歧/追高风险】+【放量】❌ 派发风险增强，需看位置和资金方向 → 高位主力流出则减仓/清仓，主力流入则减仓观察",
+        ("【上行降速：短线分歧/追高风险】", "缩量"): "【上行降速：短线分歧/追高风险】+【缩量】⚠️ 强势整理/回调洗筹特征，抛压不重 → 持有观察，接近支撑且主力未流出可低吸",
         ("【主跌浪加速：空头长短共振】",   "放量"): "【主跌浪加速：空头长短共振】+【放量】❌ 破位风险增强，抛压释放更充分 → 控制仓位，避免过早抄底",
         ("【主跌浪加速：空头长短共振】",   "缩量"): "【主跌浪加速：空头长短共振】+【缩量】⚠️ 需区分位置：低位疑似假破位，中高位可能弱势延续 → 低位/超跌且主力未流出才视为疑似低吸区",
         ("【跌势放缓：左侧建仓观察区】",   "缩量"): "【跌势放缓：左侧建仓观察区】+【缩量】✅ 抛压衰减，左侧观察区 → 小仓分批观察，等待资金或结构确认",
