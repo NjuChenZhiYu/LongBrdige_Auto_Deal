@@ -36,7 +36,14 @@ class LLMAnalyst:
         self.hk_model = Settings.KIMI_LLM_MODEL
         self.hk_client = AsyncOpenAI(api_key=self.hk_api_key, base_url=self.hk_base_url, timeout=60.0) if self.hk_api_key else None
         self.grounded_client = GeminiGroundedClient()
-        self.prompt_templates = self._load_prompt_templates()
+        self.prompt_templates = self._load_prompt_templates(
+            Settings.SINGLE_STOCK_PROMPT_TEMPLATES_CONFIG_PATH,
+            "single-stock prompt template",
+        )
+        self.stocks_prompt_templates = self._load_prompt_templates(
+            Settings.STOCKS_PROMPT_TEMPLATES_CONFIG_PATH,
+            "stocks prompt template",
+        )
         
         # Options report prompt (merged)
         self.options_prompt_template = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
@@ -52,23 +59,28 @@ class LLMAnalyst:
 {signal_text}"""
 
     @staticmethod
-    def _load_prompt_templates() -> Dict[str, Any]:
-        """Load prompt template versions from config/prompt_templates.yaml."""
-        config_path = Settings.PROMPT_TEMPLATES_CONFIG_PATH
+    def _load_prompt_templates(config_path: str, config_label: str) -> Dict[str, Any]:
+        """Load prompt template versions from a YAML config file."""
         if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Prompt template config not found: {config_path}")
+            raise FileNotFoundError(f"{config_label} config not found: {config_path}")
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         except Exception as e:
-            raise RuntimeError(f"Failed to load prompt template config: {config_path}: {e}") from e
+            raise RuntimeError(f"Failed to load {config_label} config: {config_path}: {e}") from e
         if not isinstance(data, dict):
-            raise ValueError(f"Prompt template config must be a mapping: {config_path}")
+            raise ValueError(f"{config_label} config must be a mapping: {config_path}")
         return data
 
-    def _get_prompt_output_rules(self, group_name: str, template_name: Optional[str] = None) -> str:
+    def _get_prompt_output_rules(
+        self,
+        group_name: str,
+        template_name: Optional[str] = None,
+        template_source: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Resolve a named prompt template group to its output-rule text."""
-        group = self.prompt_templates.get(group_name)
+        templates_config = template_source or self.prompt_templates
+        group = templates_config.get(group_name)
         if not isinstance(group, dict):
             raise ValueError(f"Prompt template group not found: {group_name}")
 
@@ -88,6 +100,18 @@ class LLMAnalyst:
         if not isinstance(output_rules, str) or not output_rules.strip():
             raise ValueError(f"Prompt template '{group_name}.{selected_name}' is missing output_rules")
         return output_rules.strip()
+
+    def _get_stocks_prompt_output_rules(
+        self,
+        group_name: str,
+        template_name: Optional[str] = None,
+    ) -> str:
+        """Resolve a multi-stock prompt template group to its output-rule text."""
+        return self._get_prompt_output_rules(
+            group_name,
+            template_name,
+            template_source=self.stocks_prompt_templates,
+        )
 
     @staticmethod
     def _format_multi_window_trend_lines(mid_trend: Dict[str, Any]) -> str:
@@ -489,6 +513,8 @@ class LLMAnalyst:
             stock_name = str(stock.get("name", "") or "").strip()
             symbol_for_prompt = f"{standard_symbol} {stock_name}" if stock_name else standard_symbol
             capital_data = await asyncio.to_thread(futu_client.get_capital_flow, standard_symbol)
+            if not isinstance(capital_data, pd.DataFrame):
+                capital_data = None
                 
             klines_df = await asyncio.to_thread(
                 futu_client.get_hk_historical_klines,
@@ -818,7 +844,7 @@ class LLMAnalyst:
                 reason="error"
             )
 
-    async def generate_futu_hk_report(self, threshold: float = None, trigger_type: str = 'CRON'):
+    async def generate_futu_hk_report(self, threshold: Optional[float] = None, trigger_type: str = 'CRON'):
         """
         Generate HK market report specifically for Futu data using Kimi.
         This is the dedicated method for Futu HK stock analysis.
@@ -833,10 +859,12 @@ class LLMAnalyst:
         today_date = datetime.now().strftime("%Y-%m-%d")
         
         # Get threshold from config
+        config = getattr(Settings, 'FUTU_SYMBOLS_CONFIG', {})
         if threshold is None:
             default_threshold = getattr(Settings, 'PRICE_CHANGE_THRESHOLD', 5.0)
-            config = getattr(Settings, 'FUTU_SYMBOLS_CONFIG', {})
             threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
+        else:
+            threshold = float(threshold)
         
         try:
             logger.info(f"[Gemini/Futu] Generating HK report for stocks exceeding {threshold}% threshold and special symbols...")
@@ -918,7 +946,7 @@ class LLMAnalyst:
                     
                 # Process EMA derivatives
                 try:
-                    if klines_df is not None and not klines_df.empty:
+                    if isinstance(klines_df, pd.DataFrame) and not klines_df.empty:
                         from src.analysis.futu_math_indicator import calculate_ema_derivatives
                         ema_data = calculate_ema_derivatives(klines_df, price)
                         ema_tag = ema_data.get('tag_combined', ema_data['tag'])
@@ -942,6 +970,7 @@ class LLMAnalyst:
             stock_details = await asyncio.gather(*tasks)
             
             stocks_text = "\n".join(stock_details)
+            output_rules = self._get_stocks_prompt_output_rules("hk_market_report")
             
             # Build prompt for Gemini
             prompt = f"""你是一个顶级的量化分析师。以下是触发监控阈值的异动香港股票列表及【底层资金流向数据】与【量化技术面数据】：
@@ -957,13 +986,7 @@ class LLMAnalyst:
 【异动标的详情】
 {stocks_text}
 
-请严格按照以下结构和字数要求，生成一份专业的市场快报：
-1. **市场综述**（80-100字）：基于涨跌分布判断市场整体情绪。
-2. **板块热点**（80-100字）：识别是否有机器人、物流、航天、能源、半导体等板块的集中异动。
-3. **重点个股深度剖析**（200-350字）：必须将【内部量化系统研判】（代表真实的资金博弈，如主力洗盘、机构出逃）与【量化技术面】（基于多周期EMA均线与乖离率的数学引擎结果，如V型反转预备、长短共振等）结合分析。深度点评主力和散户的博弈状态，刺穿涨跌幅的表象。若出现左侧极端信号（如极度超跌）或右侧共振信号，需重点提示其背后的均值回归或顺势加速逻辑。
-4. **具体交易策略**（100-150字）：拒绝宏观套话（如“谨慎乐观”、“重个股轻指数”），必须**直接点名上述异动标的**给出具体的实操建议。明确指出哪些标的（结合资金数据与技术面信号）可顺势跟多或左侧抄底，哪些标的（如机构出逃或估值透支）存在诱多风险需坚决规避或逢高做空，哪些建议观望。要求观点鲜明、一针见血。
-
-语言要求：专业、简洁、有港股特色，使用 Markdown 格式，字数350-450字。"""
+{output_rules}"""
 
             # Use US Client (Gemini) instead of HK Client (Kimi)
             if not self.us_client:

@@ -118,7 +118,7 @@ def main() -> None:
     parser.add_argument(
         "--prompt-template",
         default=None,
-        help="指定 config/prompt_templates.yaml 中 hk_single_stock.templates 的版本名；默认使用 active",
+        help="指定 config/single_stock_prompt_templates.yaml 中 hk_single_stock.templates 的版本名；默认使用 active",
     )
     args = parser.parse_args()
 

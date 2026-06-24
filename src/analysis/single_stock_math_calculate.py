@@ -97,7 +97,6 @@ def calculate_ema_derivatives(
         volume_regime  : 放量 / 中性 / 缩量（双确认或短/中期极端阈值，见文档 §2.5.3）
         volume_ratio_target_ema5  : V_target / V_ema5
         volume_ratio_target_ema20 : V_target / V_ema20
-        volume_ratio_ema5_ema20   : V_ema5 / V_ema20
     """
     _empty = {
         "tag": "数据不足",
@@ -107,7 +106,6 @@ def calculate_ema_derivatives(
         "volume_regime": "中性",
         "volume_ratio_target_ema5": 1.0,
         "volume_ratio_target_ema20": 1.0,
-        "volume_ratio_ema5_ema20": 1.0,
     }
     if df is None or df.empty or "close" not in df.columns or len(df) < 20:
         logger.warning("Data too short or missing 'close' column for EMA derivatives calculation.")
@@ -117,7 +115,6 @@ def calculate_ema_derivatives(
     volume_regime = "中性"
     r_target_ema5 = 1.0
     r_target_ema20 = 1.0
-    r_ema5_ema20 = 1.0
     vol_col = None
     current_vol_value = None
     closed_vol = pd.Series(dtype="float64")
@@ -156,11 +153,9 @@ def calculate_ema_derivatives(
             if v_ema5 > 0 and v_ema20 > 0:
                 raw_r_target_ema5 = target_vol / v_ema5
                 raw_r_target_ema20 = target_vol / v_ema20
-                raw_r_ema5_ema20 = v_ema5 / v_ema20
 
                 r_target_ema5 = round(raw_r_target_ema5, 3)
                 r_target_ema20 = round(raw_r_target_ema20, 3)
-                r_ema5_ema20 = round(raw_r_ema5_ema20, 3)
 
                 is_expand_double_confirm = (
                     raw_r_target_ema20 >= Settings.VOLUME_EXPAND_DOUBLE_EMA20_THRESHOLD
@@ -183,10 +178,38 @@ def calculate_ema_derivatives(
                     raw_r_target_ema20 <= Settings.VOLUME_SHRINK_LONG_EMA20_EXTREME_THRESHOLD
                 )
 
+                volume_rule_hits = []
+                if is_expand_double_confirm:
+                    volume_rule_hits.append("expand_double_confirm")
+                if is_expand_short_extreme:
+                    volume_rule_hits.append("expand_short_ema5_extreme")
+                if is_expand_long_extreme:
+                    volume_rule_hits.append("expand_long_ema20_extreme")
+                if is_shrink_double_confirm:
+                    volume_rule_hits.append("shrink_double_confirm")
+                if is_shrink_short_extreme:
+                    volume_rule_hits.append("shrink_short_ema5_extreme")
+                if is_shrink_long_extreme:
+                    volume_rule_hits.append("shrink_long_ema20_extreme")
+
                 if is_expand_double_confirm or is_expand_short_extreme or is_expand_long_extreme:
                     volume_regime = "放量"
                 elif is_shrink_double_confirm or is_shrink_short_extreme or is_shrink_long_extreme:
                     volume_regime = "缩量"
+
+                logger.warning(
+                    "[VolumeRegime] col=%s source=%s target=%.2f ema5=%.2f ema20=%.2f "
+                    "r5=%.3f r20=%.3f regime=%s rules=%s",
+                    vol_col,
+                    "current" if use_current_volume else "last_closed",
+                    target_vol,
+                    v_ema5,
+                    v_ema20,
+                    raw_r_target_ema5,
+                    raw_r_target_ema20,
+                    volume_regime,
+                    ",".join(volume_rule_hits) if volume_rule_hits else "none",
+                )
 
     # --- EMA 衍生指标（含当日实时价格）---
     df_calc = df.copy()
@@ -255,7 +278,6 @@ def calculate_ema_derivatives(
         "volume_regime": volume_regime,
         "volume_ratio_target_ema5": r_target_ema5,
         "volume_ratio_target_ema20": r_target_ema20,
-        "volume_ratio_ema5_ema20": r_ema5_ema20,
     }
 
 
