@@ -133,10 +133,10 @@ class Settings:
     try:
         VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD = float(_yaml_thresholds.get(
             'volume_shrink_double_ema20',
-            os.getenv("VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD", "0.6")
+            os.getenv("VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD", "0.7")
         ))
     except ValueError:
-        VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD = 0.6
+        VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD = 0.7
 
     try:
         VOLUME_EXPAND_SHORT_EMA5_THRESHOLD = float(_yaml_thresholds.get(
