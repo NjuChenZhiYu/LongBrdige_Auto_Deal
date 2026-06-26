@@ -402,7 +402,7 @@ async def generate_us_single_stock_report(
 | ⑤ 基本面数据 | `build_hk_fundamental_data(symbol, stock, (5,10,90))` | `build_us_fundamental_data(us_symbol, stock, (5,10,90))` |
 | ⑥ 短期记忆 | `build_short_term_memory(klines_df, stock, capital_data)` | `us_indicator.build_short_term_memory(klines_df, stock, capital_data)` |
 | ⑦ 中期趋势 | `build_mid_term_trend(klines_df, price)` | `us_indicator.build_mid_term_trend(klines_df, price)` |
-| ⑧ Prompt 构建 | `self._build_single_stock_prompt(...)` | `self._build_us_single_stock_prompt(...)` |
+| ⑧ Prompt 构建 | `self._build_hk_single_stock_prompt(...)` | `self._build_us_single_stock_prompt(...)` |
 | ⑨ LLM 调用 | `self._call_llm_with_retry(prompt, grounded=True)` | 同左，复用 Gemini Grounded Search |
 | ⑩ 推送 | `FeishuAlert.send_alert(title, full_report)` | 同左 |
 

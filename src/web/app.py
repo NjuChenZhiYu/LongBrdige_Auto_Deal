@@ -276,6 +276,11 @@ def hk_market():
         logger.error(f"Error in hk_market route: {e}", exc_info=True)
         return f"Internal Server Error: {e}", 500
 
+@app.route('/a_market')
+def a_market():
+    """A-share market page. Currently supports manual single-stock report trigger."""
+    return render_template('a_market.html')
+
 @app.route('/reports')
 def reports_page():
     return render_template('reports.html')
@@ -392,6 +397,36 @@ async def trigger_hk_single_stock_report():
         }), 500
     except Exception as e:
         logger.error(f"Error triggering HK single-stock report: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/reports/trigger/a-market/single-stock', methods=['POST'])
+async def trigger_a_market_single_stock_report():
+    """Generate single-stock A-share report by symbol from frontend."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        symbol = (payload.get('symbol') or request.form.get('symbol') or '').strip()
+        if not symbol:
+            return jsonify({'status': 'error', 'message': 'symbol 不能为空'}), 400
+
+        result = await llm_analyst.generate_a_market_single_stock_report(
+            symbol_input=symbol,
+            trigger_type='MANUAL',
+        )
+        if result.get('ok'):
+            return jsonify({
+                'status': 'success',
+                'message': f"A股单股研报生成成功: {result.get('symbol')}",
+                'symbol': result.get('symbol'),
+                'title': result.get('title'),
+                'report': result.get('report'),
+            }), 200
+        return jsonify({
+            'status': 'error',
+            'message': result.get('error') or 'A股单股研报生成失败',
+            'symbol': result.get('symbol'),
+        }), 500
+    except Exception as e:
+        logger.error(f"Error triggering A-share single-stock report: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 from src.api.futu.client import futu_client
@@ -542,7 +577,7 @@ def sync_watchlist():
 
 @app.route('/add_symbol', methods=['POST'])
 def add_symbol():
-    symbol = request.form.get('symbol').strip().upper()
+    symbol = request.form.get('symbol', '').strip().upper()
     if symbol:
         config = load_config()
         symbols = config.get('symbols', [])

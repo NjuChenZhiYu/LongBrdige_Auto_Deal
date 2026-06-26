@@ -13,6 +13,7 @@ from src.analysis.single_stock_math_calculate import (
     _calculate_risk_metrics as common_calculate_risk_metrics,
     _format_rt_time_label as common_format_rt_time_label,
     _safe_float as common_safe_float,
+    build_revenue_breakdown_profile as common_build_revenue_breakdown_profile,
     calc_poc as common_calc_poc,
     calculate_ema_derivatives as common_calculate_ema_derivatives,
     classify_mid_shape as common_classify_mid_shape,
@@ -596,6 +597,7 @@ def build_hk_fundamental_data(
     fundamental_data["plate_info"] = plate_info
     fundamental_data.update(get_today_capital_flow(symbol))
     fundamental_data.update(common_build_liquidity_profiles(klines_df, finance_snapshot))
+    fundamental_data["revenue_breakdown_profile"] = common_build_revenue_breakdown_profile(symbol)
     fundamental_data["institutional_holding_profile"] = build_institutional_holding_profile(symbol)
     fundamental_data["shareholder_holding_change_profile"] = build_shareholder_holding_change_profile(symbol)
     return fundamental_data

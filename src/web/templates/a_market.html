@@ -1,0 +1,109 @@
+{% extends "layout.html" %}
+
+{% block title %}A股市场 - 量化交易监控中心{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+    .report-panel {
+        margin-top: 12px;
+        border: 1px solid #e6e6e6;
+        border-radius: 8px;
+        background: #fafafa;
+        padding: 12px;
+        display: none;
+    }
+    .report-panel h3 {
+        margin: 0 0 10px 0;
+        color: #333;
+        font-size: 16px;
+    }
+    .markdown-body {
+        line-height: 1.6;
+        color: #222;
+    }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+        margin-top: 12px;
+    }
+    .markdown-body pre {
+        background: #f0f0f0;
+        padding: 10px;
+        overflow-x: auto;
+        border-radius: 6px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>A股市场 (Futu)</h2>
+    <p>当前先支持 A 股单股深度研报。输入 A 股代码后，会通过 Futu 行情数据生成并推送研报。</p>
+
+    <form id="a-market-single-stock-form" onsubmit="return triggerAMarketSingleStockReport(this, event)">
+        <div class="form-group">
+            <label for="a_market_single_stock_symbol">A股代码</label>
+            <input id="a_market_single_stock_symbol" name="symbol" type="text" placeholder="如 600519、SH.600519、000001.SZ" required>
+            <div class="hint">支持裸代码（600519 / 000001）、Futu 格式（SH.600519 / SZ.000001）和后缀格式（600519.SH / 000001.SZ）。</div>
+        </div>
+        <button id="a-market-single-stock-submit" type="submit" style="background: linear-gradient(135deg, #d53369 0%, #daae51 100%); color: white;">生成A股单股研报</button>
+    </form>
+
+    <div id="a-market-single-stock-status" class="hint" style="margin-top: 10px;"></div>
+    <div id="a-market-single-stock-report-panel" class="report-panel">
+        <h3>A股单股研报结果</h3>
+        <div id="a-market-single-stock-report" class="markdown-body"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function triggerAMarketSingleStockReport(form, event) {
+        event.preventDefault();
+        const input = document.getElementById('a_market_single_stock_symbol');
+        const statusEl = document.getElementById('a-market-single-stock-status');
+        const reportEl = document.getElementById('a-market-single-stock-report');
+        const reportPanelEl = document.getElementById('a-market-single-stock-report-panel');
+        const btn = document.getElementById('a-market-single-stock-submit');
+        const symbol = (input.value || '').trim();
+
+        if (!symbol) {
+            statusEl.textContent = '请输入A股代码';
+            statusEl.style.color = 'red';
+            return false;
+        }
+
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = '生成中...';
+        statusEl.textContent = `正在生成 ${symbol} 的A股单股研报，请稍候（约30-90秒）...`;
+        statusEl.style.color = '#666';
+        reportPanelEl.style.display = 'none';
+        reportEl.innerHTML = '';
+
+        try {
+            const response = await fetch('/api/reports/trigger/a-market/single-stock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol })
+            });
+            const result = await response.json();
+            if (!response.ok || result.status !== 'success') {
+                throw new Error(result.message || '请求失败');
+            }
+
+            statusEl.textContent = result.message || 'A股单股研报生成成功';
+            statusEl.style.color = '#1f7a1f';
+            reportEl.innerHTML = marked.parse(result.report || '');
+            reportPanelEl.style.display = 'block';
+        } catch (e) {
+            statusEl.textContent = `生成失败: ${e.message || e}`;
+            statusEl.style.color = 'red';
+        } finally {
+            btn.disabled = false;
+            btn.innerText = originalText;
+        }
+        return false;
+    }
+</script>
+{% endblock %}
