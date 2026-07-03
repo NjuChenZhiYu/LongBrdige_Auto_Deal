@@ -58,7 +58,14 @@ class Settings:
     # Load symbols from yaml if available
     LONGPORT_SYMBOLS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "longport_symbols.yaml")
     FUTU_SYMBOLS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "futu_symbols.yaml")
-    PROMPT_TEMPLATES_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompt_templates.yaml")
+    SINGLE_STOCK_PROMPT_TEMPLATES_CONFIG_PATH = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "single_stock_prompt_templates.yaml",
+    )
+    STOCKS_PROMPT_TEMPLATES_CONFIG_PATH = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "stocks_prompt_templates.yaml",
+    )
     
     LONGPORT_SYMBOLS_CONFIG = {}
     FUTU_SYMBOLS_CONFIG = {}
@@ -126,10 +133,10 @@ class Settings:
     try:
         VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD = float(_yaml_thresholds.get(
             'volume_shrink_double_ema20',
-            os.getenv("VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD", "0.6")
+            os.getenv("VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD", "0.7")
         ))
     except ValueError:
-        VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD = 0.6
+        VOLUME_SHRINK_DOUBLE_EMA20_THRESHOLD = 0.7
 
     try:
         VOLUME_EXPAND_SHORT_EMA5_THRESHOLD = float(_yaml_thresholds.get(

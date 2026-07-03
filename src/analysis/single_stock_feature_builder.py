@@ -750,7 +750,14 @@ def prepare_short_term_dataset(
             "current_turnover": current_turnover,
         }
 
-    d_current = d.copy()
+    # Keep today's partial/accumulated daily K out of the volume baseline.
+    # Before 15:00, target volume falls back to the last completed trading day;
+    # after 15:00, snapshot current_volume/current_turnover becomes the target.
+    d_history = _drop_current_session_liquidity_rows(d, date_col, stock_snapshot)
+    if d_history.empty:
+        d_history = d
+
+    d_current = d_history.copy()
     latest_row = d_current.iloc[-1].copy()
     # 强制将实时价格作为“当前时刻”样本追加到序列末端，
     # 保证 short 侧指标不再停留在前一交易日收盘口径。
@@ -766,7 +773,12 @@ def prepare_short_term_dataset(
         elif "amount" in d_current.columns:
             latest_row["amount"] = current_turnover
     if date_col in d_current.columns:
-        latest_row[date_col] = common_format_rt_time_label(latest_row.get(date_col))
+        rt_time_base = (
+            stock_snapshot.get("update_time")
+            or stock_snapshot.get("last_trade_time")
+            or stock_snapshot.get("data_date")
+        )
+        latest_row[date_col] = common_format_rt_time_label(rt_time_base)
     d_current.loc[len(d_current)] = latest_row
 
     d_current = _add_short_technical_columns(d_current)

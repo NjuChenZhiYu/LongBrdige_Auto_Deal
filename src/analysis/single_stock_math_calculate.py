@@ -10,6 +10,88 @@ from config.settings import Settings
 logger = logging.getLogger(__name__)
 
 
+def _revenue_breakdown_type_name(type_value: Any) -> str:
+    text = str(type_value or "").upper()
+    if "PRODUCT" in text or text in ("1", "REV_BREAKDOWN_PRODUCT"):
+        return "产品"
+    if "INDUSTRY" in text or text in ("2", "REV_BREAKDOWN_INDUSTRY"):
+        return "行业"
+    if "REGION" in text or text in ("4", "REV_BREAKDOWN_REGION"):
+        return "地区"
+    if "BUSINESS" in text or text in ("8", "REV_BREAKDOWN_BUSINESS"):
+        return "业务"
+    return text if text else "未知维度"
+
+
+def _format_revenue_breakdown_amount(val: float, raw: Any) -> str:
+    if raw is None:
+        return "无数据"
+    try:
+        if pd.isna(raw):
+            return "无数据"
+    except Exception:
+        pass
+    if abs(val) > 1_0000_0000:
+        return f"{round(val / 1_0000_0000.0, 2)}亿"
+    return f"{round(val / 1_0000.0, 2)}万"
+
+
+def _format_revenue_breakdown_pct(value: Any) -> str:
+    try:
+        val = float(value)
+        if pd.isna(val):
+            return "无数据"
+    except Exception:
+        return "无数据"
+    sign = "+" if val > 0 else ""
+    return f"{sign}{round(val, 2)}%"
+
+
+def build_revenue_breakdown_profile(symbol: str, top_n: int = 3, log_prefix: str = "SingleStock") -> str:
+    """Build compact revenue composition profile from Futu revenue breakdown data."""
+    from src.api.futu.client import futu_client
+
+    try:
+        quote_ctx = futu_client.get_quote_context()
+        method = getattr(quote_ctx, "get_financials_revenue_breakdown", None)
+        if method is None:
+            return "当前 Futu SDK 未暴露 get_financials_revenue_breakdown，无法获取主营构成。"
+
+        ret, data = method(symbol)
+        if ret != 0 or not isinstance(data, dict):
+            logger.warning(f"[{log_prefix}/RevenueBreakdown] get_financials_revenue_breakdown failed for {symbol}: {data}")
+            return "无数据"
+
+        breakdown_list = data.get("breakdown_list") or []
+        period = str(data.get("period") or "未知期间").strip()
+        currency_code = str(data.get("currency_code") or "").strip()
+        currency_suffix = f" {currency_code}" if currency_code else ""
+        parts = []
+        for breakdown in breakdown_list:
+            if not isinstance(breakdown, dict):
+                continue
+            dimension = _revenue_breakdown_type_name(breakdown.get("type"))
+            item_list = breakdown.get("item_list") or []
+            rows = []
+            for item in item_list[:top_n]:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "未知").strip()
+                ratio = _format_revenue_breakdown_pct(item.get("ratio")).lstrip("+")
+                income_raw = item.get("main_oper_income")
+                income = _safe_float(income_raw, 0.0)
+                rows.append(f"{name} {ratio}（收入{_format_revenue_breakdown_amount(income, income_raw)}{currency_suffix}）")
+            if rows:
+                parts.append(f"{dimension}Top{top_n}：" + "；".join(rows))
+
+        if not parts:
+            return "无数据"
+        return f"{period}：" + " | ".join(parts)
+    except Exception as e:
+        logger.warning(f"[{log_prefix}/RevenueBreakdown] Failed to build revenue breakdown for {symbol}: {e}")
+        return "无数据"
+
+
 def calculate_bollinger_bands(
     df: pd.DataFrame,
     current_price: float,
@@ -97,7 +179,6 @@ def calculate_ema_derivatives(
         volume_regime  : 放量 / 中性 / 缩量（双确认或短/中期极端阈值，见文档 §2.5.3）
         volume_ratio_target_ema5  : V_target / V_ema5
         volume_ratio_target_ema20 : V_target / V_ema20
-        volume_ratio_ema5_ema20   : V_ema5 / V_ema20
     """
     _empty = {
         "tag": "数据不足",
@@ -107,7 +188,6 @@ def calculate_ema_derivatives(
         "volume_regime": "中性",
         "volume_ratio_target_ema5": 1.0,
         "volume_ratio_target_ema20": 1.0,
-        "volume_ratio_ema5_ema20": 1.0,
     }
     if df is None or df.empty or "close" not in df.columns or len(df) < 20:
         logger.warning("Data too short or missing 'close' column for EMA derivatives calculation.")
@@ -117,7 +197,6 @@ def calculate_ema_derivatives(
     volume_regime = "中性"
     r_target_ema5 = 1.0
     r_target_ema20 = 1.0
-    r_ema5_ema20 = 1.0
     vol_col = None
     current_vol_value = None
     closed_vol = pd.Series(dtype="float64")
@@ -156,11 +235,9 @@ def calculate_ema_derivatives(
             if v_ema5 > 0 and v_ema20 > 0:
                 raw_r_target_ema5 = target_vol / v_ema5
                 raw_r_target_ema20 = target_vol / v_ema20
-                raw_r_ema5_ema20 = v_ema5 / v_ema20
 
                 r_target_ema5 = round(raw_r_target_ema5, 3)
                 r_target_ema20 = round(raw_r_target_ema20, 3)
-                r_ema5_ema20 = round(raw_r_ema5_ema20, 3)
 
                 is_expand_double_confirm = (
                     raw_r_target_ema20 >= Settings.VOLUME_EXPAND_DOUBLE_EMA20_THRESHOLD
@@ -183,10 +260,38 @@ def calculate_ema_derivatives(
                     raw_r_target_ema20 <= Settings.VOLUME_SHRINK_LONG_EMA20_EXTREME_THRESHOLD
                 )
 
+                volume_rule_hits = []
+                if is_expand_double_confirm:
+                    volume_rule_hits.append("expand_double_confirm")
+                if is_expand_short_extreme:
+                    volume_rule_hits.append("expand_short_ema5_extreme")
+                if is_expand_long_extreme:
+                    volume_rule_hits.append("expand_long_ema20_extreme")
+                if is_shrink_double_confirm:
+                    volume_rule_hits.append("shrink_double_confirm")
+                if is_shrink_short_extreme:
+                    volume_rule_hits.append("shrink_short_ema5_extreme")
+                if is_shrink_long_extreme:
+                    volume_rule_hits.append("shrink_long_ema20_extreme")
+
                 if is_expand_double_confirm or is_expand_short_extreme or is_expand_long_extreme:
                     volume_regime = "放量"
                 elif is_shrink_double_confirm or is_shrink_short_extreme or is_shrink_long_extreme:
                     volume_regime = "缩量"
+
+                logger.warning(
+                    "[VolumeRegime] col=%s source=%s target=%.2f ema5=%.2f ema20=%.2f "
+                    "r5=%.3f r20=%.3f regime=%s rules=%s",
+                    vol_col,
+                    "current" if use_current_volume else "last_closed",
+                    target_vol,
+                    v_ema5,
+                    v_ema20,
+                    raw_r_target_ema5,
+                    raw_r_target_ema20,
+                    volume_regime,
+                    ",".join(volume_rule_hits) if volume_rule_hits else "none",
+                )
 
     # --- EMA 衍生指标（含当日实时价格）---
     df_calc = df.copy()
@@ -255,7 +360,6 @@ def calculate_ema_derivatives(
         "volume_regime": volume_regime,
         "volume_ratio_target_ema5": r_target_ema5,
         "volume_ratio_target_ema20": r_target_ema20,
-        "volume_ratio_ema5_ema20": r_ema5_ema20,
     }
 
 

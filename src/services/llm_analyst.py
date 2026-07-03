@@ -36,7 +36,14 @@ class LLMAnalyst:
         self.hk_model = Settings.KIMI_LLM_MODEL
         self.hk_client = AsyncOpenAI(api_key=self.hk_api_key, base_url=self.hk_base_url, timeout=60.0) if self.hk_api_key else None
         self.grounded_client = GeminiGroundedClient()
-        self.prompt_templates = self._load_prompt_templates()
+        self.prompt_templates = self._load_prompt_templates(
+            Settings.SINGLE_STOCK_PROMPT_TEMPLATES_CONFIG_PATH,
+            "single-stock prompt template",
+        )
+        self.stocks_prompt_templates = self._load_prompt_templates(
+            Settings.STOCKS_PROMPT_TEMPLATES_CONFIG_PATH,
+            "stocks prompt template",
+        )
         
         # Options report prompt (merged)
         self.options_prompt_template = """你是一位华尔街资深的生物医药期权交易员。我将提供今天盘中触发异动报警的远期期权 (LEAPS) 数据。
@@ -52,23 +59,28 @@ class LLMAnalyst:
 {signal_text}"""
 
     @staticmethod
-    def _load_prompt_templates() -> Dict[str, Any]:
-        """Load prompt template versions from config/prompt_templates.yaml."""
-        config_path = Settings.PROMPT_TEMPLATES_CONFIG_PATH
+    def _load_prompt_templates(config_path: str, config_label: str) -> Dict[str, Any]:
+        """Load prompt template versions from a YAML config file."""
         if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Prompt template config not found: {config_path}")
+            raise FileNotFoundError(f"{config_label} config not found: {config_path}")
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         except Exception as e:
-            raise RuntimeError(f"Failed to load prompt template config: {config_path}: {e}") from e
+            raise RuntimeError(f"Failed to load {config_label} config: {config_path}: {e}") from e
         if not isinstance(data, dict):
-            raise ValueError(f"Prompt template config must be a mapping: {config_path}")
+            raise ValueError(f"{config_label} config must be a mapping: {config_path}")
         return data
 
-    def _get_prompt_output_rules(self, group_name: str, template_name: Optional[str] = None) -> str:
+    def _get_prompt_output_rules(
+        self,
+        group_name: str,
+        template_name: Optional[str] = None,
+        template_source: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Resolve a named prompt template group to its output-rule text."""
-        group = self.prompt_templates.get(group_name)
+        templates_config = template_source or self.prompt_templates
+        group = templates_config.get(group_name)
         if not isinstance(group, dict):
             raise ValueError(f"Prompt template group not found: {group_name}")
 
@@ -88,6 +100,18 @@ class LLMAnalyst:
         if not isinstance(output_rules, str) or not output_rules.strip():
             raise ValueError(f"Prompt template '{group_name}.{selected_name}' is missing output_rules")
         return output_rules.strip()
+
+    def _get_stocks_prompt_output_rules(
+        self,
+        group_name: str,
+        template_name: Optional[str] = None,
+    ) -> str:
+        """Resolve a multi-stock prompt template group to its output-rule text."""
+        return self._get_prompt_output_rules(
+            group_name,
+            template_name,
+            template_source=self.stocks_prompt_templates,
+        )
 
     @staticmethod
     def _format_multi_window_trend_lines(mid_trend: Dict[str, Any]) -> str:
@@ -115,7 +139,7 @@ class LLMAnalyst:
             for item in window_trends
         )
 
-    def _build_single_stock_prompt(
+    def _build_hk_single_stock_prompt(
         self,
         symbol: str,
         current_time: str,
@@ -124,7 +148,7 @@ class LLMAnalyst:
         mid_trend: Dict[str, Any],
         prompt_template: Optional[str] = None,
     ) -> str:
-        """Build final LLM prompt from structured short/mid features."""
+        """Build final HK LLM prompt from structured short/mid features."""
         today = short_memory.get("today", {}) or {}
         summary_10d = short_memory.get("summary_10d", {}) or {}
         drawdown_raw = summary_10d.get("max_drawdown_10d_pct", 0.0)
@@ -149,10 +173,9 @@ class LLMAnalyst:
     - 流通股本：{fundamental_data.get('outstanding_shares', '无数据')}
     - 资产净值：{fundamental_data.get('net_asset', '无数据')}
     - 业绩兑现（Longbridge营收/同比）：{fundamental_data.get('revenue_disclosure_profile', '无数据')}
-    - 每股盈利(EPS)：{fundamental_data.get('earning_per_share', '无数据')}
+    - 主营构成（产品/行业/地区/业务）：{fundamental_data.get('revenue_breakdown_profile', '无数据')}
     - 每股净资产(BPS)：{fundamental_data.get('net_asset_per_share', '无数据')}
     - PB：{fundamental_data.get('pb_ratio', '无数据')}
-    - 市盈率TTM：{fundamental_data.get('pe_ttm', '无数据')}
     
     【资金流与流动性】
     - 资金方向（当日实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
@@ -167,6 +190,75 @@ class LLMAnalyst:
     - 机构持仓趋势（最新报告期）：{fundamental_data.get('institutional_holding_profile', '无数据')}
     - 股东持仓变动（仅最新报告期）：{fundamental_data.get('shareholder_holding_change_profile', '无数据')}
     - 解读约束：机构持仓和股东变动为季度级滞后数据，只作为中期筹码集中度证据；不得因单条小额增持直接看多，也不得忽略核心股东或知名机构减持。
+
+    【趋势筹码与短期结构】
+    - window_used (实际可用天数): {short_memory.get('window_used')}
+    - short_window_incomplete (是否不足10日): {short_memory.get('short_window_incomplete')}
+    - 当日快照:
+      - date (日期): {today.get('date')}
+      - rt_price (此刻价格): {today.get('rt_price')}
+      - day_high_low (当日最高/最低): {today.get('day_high_low')}
+      - intraday_position (当前价日内位置): {today.get('intraday_position')}
+      - change_rate (当日涨跌幅): {today.get('change_rate')}%
+      - bias20 (乖离率，仅观测指标): {today.get('bias20')}%
+      - tag_today (当日结构信号): {today.get('tag_today')}
+      - bollinger_position (布林轨位置): {today.get('bb_summary')}
+    - 10日压缩画像:
+      - max_cum_up_10d_pct (10日累计最大涨幅): {summary_10d.get('max_cum_up_10d_pct')}%
+      - max_cum_drop_10d_pct (10日累计最大跌幅): {summary_10d.get('max_cum_drop_10d_pct')}%
+      - max_drawdown_10d_pct (10日最大回撤): {drawdown_10d_fmt}
+      - short_window_price_distribute (筹码集中区前三名): {summary_10d.get('short_window_price_distribute')}
+      - poc_range_10d (主峰价格区间): {summary_10d.get('poc_range_10d')}
+      - poc_ratio_10d_pct (主峰成交量占比): {summary_10d.get('poc_ratio_10d_pct')}%
+
+    【多周期趋势与位置】
+{trend_lines}
+
+{output_rules}"""
+
+    def _build_a_market_single_stock_prompt(
+        self,
+        symbol: str,
+        current_time: str,
+        fundamental_data: Dict[str, Any],
+        short_memory: Dict[str, Any],
+        mid_trend: Dict[str, Any],
+        prompt_template: Optional[str] = None,
+    ) -> str:
+        """Build A-share LLM prompt from HK-compatible structured features."""
+        today = short_memory.get("today", {}) or {}
+        summary_10d = short_memory.get("summary_10d", {}) or {}
+        drawdown_raw = summary_10d.get("max_drawdown_10d_pct", 0.0)
+        try:
+            drawdown_10d_fmt = f"-{abs(float(drawdown_raw))}%"
+        except Exception:
+            drawdown_10d_fmt = "无数据"
+        trend_lines = self._format_multi_window_trend_lines(mid_trend)
+        output_rules = self._get_prompt_output_rules("a_market_single_stock", prompt_template)
+        return f"""你是A股量化深度分析师。请基于下面结构化数据生成单股研报。
+    【报告时间】
+    {current_time}
+
+    【标的】
+    {symbol}
+
+    【基本面与估值快照】
+    - 所属板块：{fundamental_data.get('plate_info', '无数据')}
+    - 总市值：{fundamental_data.get('total_market_val', '无数据')}
+    - 流通市值：{fundamental_data.get('circular_market_val', '无数据')}
+    - 总股本：{fundamental_data.get('issued_shares', '无数据')}
+    - 流通股本：{fundamental_data.get('outstanding_shares', '无数据')}
+    - 资产净值：{fundamental_data.get('net_asset', '无数据')}
+    - 主营构成（产品/行业/地区/业务）：{fundamental_data.get('revenue_breakdown_profile', '无数据')}
+
+    【资金流与流动性】
+    - 资金方向（当日实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
+    - 资金方向（历史窗口）：5日主力/整体 {fundamental_data.get('main_in_flow_5d', '无数据')} / {fundamental_data.get('total_in_flow_5d', '无数据')}；10日主力/整体 {fundamental_data.get('main_in_flow_10d', '无数据')} / {fundamental_data.get('total_in_flow_10d', '无数据')}；90日主力/整体 {fundamental_data.get('main_in_flow_90d', '无数据')} / {fundamental_data.get('total_in_flow_90d', '无数据')}
+    - 短线量能状态（仅解释 tag_today，不单独等同流动性承接）：{today.get('volume_regime', '见tag_today')}
+    - 成交额承接（相对20/60/180日，偏低/安全/偏高）：{fundamental_data.get('turnover_liquidity_profile', '暂无结构化数据')}
+    - 换手率承接（相对20/60/180日，偏低/安全/偏高）：{fundamental_data.get('turnover_rate_liquidity_profile', '暂无结构化数据')}
+    - 承接解释约束：成交额/换手率偏高不自动利多、偏低不自动利空，必须结合当日涨跌幅、价格所处低/中/高位、趋势筹码与是否高位滞涨或放量下跌判断。
+    - 口径约束：成交额/换手率 15:00 前使用最近完整交易日，15:00 后且快照确认当日才使用当天累计值；短线放量/缩量与中期流动性不得重复计分。
 
     【趋势筹码与短期结构】
     - window_used (实际可用天数): {short_memory.get('window_used')}
@@ -335,6 +427,31 @@ class LLMAnalyst:
             return f"US.{raw}"
         return None
 
+    @staticmethod
+    def _parse_a_market_symbol(symbol_input: str) -> Optional[str]:
+        """Normalize user input to Futu-native A-share format (SH.xxxxxx / SZ.xxxxxx)."""
+        raw = str(symbol_input or "").strip().upper()
+        if not raw:
+            return None
+
+        full_match = re.match(r"^(SH|SZ)\.(\d{6})$", raw)
+        if full_match:
+            return f"{full_match.group(1)}.{full_match.group(2)}"
+
+        suffix_match = re.match(r"^(\d{6})\.(SH|SZ)$", raw)
+        if suffix_match:
+            return f"{suffix_match.group(2)}.{suffix_match.group(1)}"
+
+        if re.match(r"^\d{6}$", raw):
+            sh_prefixes = ("600", "601", "603", "605", "688", "689")
+            sz_prefixes = ("000", "001", "002", "003", "300", "301")
+            if raw.startswith(sh_prefixes):
+                return f"SH.{raw}"
+            if raw.startswith(sz_prefixes):
+                return f"SZ.{raw}"
+
+        return None
+
     async def generate_us_single_stock_report(
         self,
         symbol_input: str,
@@ -489,6 +606,8 @@ class LLMAnalyst:
             stock_name = str(stock.get("name", "") or "").strip()
             symbol_for_prompt = f"{standard_symbol} {stock_name}" if stock_name else standard_symbol
             capital_data = await asyncio.to_thread(futu_client.get_capital_flow, standard_symbol)
+            if not isinstance(capital_data, pd.DataFrame):
+                capital_data = None
                 
             klines_df = await asyncio.to_thread(
                 futu_client.get_hk_historical_klines,
@@ -522,7 +641,7 @@ class LLMAnalyst:
             except Exception as e:
                 logger.warning(f"[Gemini/SingleStock] Longbridge revenue profile unavailable for {standard_symbol}: {e}")
                 fundamental_data["revenue_disclosure_profile"] = "长桥营收披露数据暂不可用"
-            prompt = self._build_single_stock_prompt(
+            prompt = self._build_hk_single_stock_prompt(
                 symbol_for_prompt,
                 current_time,
                 fundamental_data,
@@ -566,6 +685,115 @@ class LLMAnalyst:
         except Exception as e:
             logger.error(f"[Gemini/SingleStock] failed for {symbol_input}: {e}", exc_info=True)
             error_title = f"[单股研报错误] {symbol_input} ({current_time})"
+            error_content = f"❌ 分析失败：{str(e)}"
+            await FeishuAlert.send_alert(error_title, error_content)
+            return {"ok": False, "symbol": symbol_input, "title": None, "report": None, "error": str(e)}
+
+    async def generate_a_market_single_stock_report(
+        self,
+        symbol_input: str,
+        trigger_type: str = "MANUAL",
+        lookback_days_short: int = 10,
+        lookback_days_mid: int = 90,
+        enable_grounded_search: bool = True,
+    ) -> Dict[str, Any]:
+        """Generate single-stock deep analysis report for A-share symbols."""
+        from src.api.futu.client import futu_client
+        from src.analysis.a_market_single_stock_indicator import (
+            build_a_market_fundamental_data,
+            build_mid_term_trend,
+            build_short_term_memory,
+        )
+
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        try:
+            standard_symbol = self._parse_a_market_symbol(symbol_input)
+            if not standard_symbol:
+                msg = "未匹配到有效A股代码（支持 SZ.000001 / 000001.SZ / 000001 / SH.600519 / 600519）"
+                return {"ok": False, "symbol": symbol_input, "title": None, "report": None, "error": msg}
+
+            logger.info(
+                f"[Gemini/AMarketSingleStock] start symbol_input={symbol_input}, parsed={standard_symbol}, trigger={trigger_type}"
+            )
+
+            snapshot_list = await asyncio.to_thread(futu_client.get_special_quotes, [standard_symbol])
+            if not snapshot_list:
+                msg = "未获取到A股快照数据，请确认代码或行情权限。"
+                return {"ok": False, "symbol": standard_symbol, "title": None, "report": None, "error": msg}
+
+            stock = snapshot_list[0]
+            price = float(stock.get("last_price", 0.0))
+            stock_name = str(stock.get("name", "") or "").strip()
+            symbol_for_prompt = f"{standard_symbol} {stock_name}" if stock_name else standard_symbol
+
+            capital_data = await asyncio.to_thread(futu_client.get_capital_flow, standard_symbol)
+            if not isinstance(capital_data, pd.DataFrame):
+                capital_data = None
+
+            klines_df = await asyncio.to_thread(
+                futu_client.get_historical_klines,
+                standard_symbol,
+                max(lookback_days_mid + 60, 240),
+            )
+            if not isinstance(klines_df, pd.DataFrame) or klines_df.empty:
+                msg = f"未获取到 {standard_symbol} 历史K线数据，无法生成短期与多周期分析。"
+                logger.warning(f"[Gemini/AMarketSingleStock] {msg}")
+                return {"ok": False, "symbol": standard_symbol, "title": None, "report": None, "error": msg}
+
+            short_memory = build_short_term_memory(klines_df, stock, capital_data, lookback_days_short)
+            mid_trend = build_mid_term_trend(klines_df, price, lookback_days_mid)
+            fundamental_data = await asyncio.to_thread(
+                build_a_market_fundamental_data,
+                standard_symbol,
+                stock,
+                (5, 10, 90),
+                klines_df,
+            )
+
+            prompt = self._build_a_market_single_stock_prompt(
+                symbol_for_prompt,
+                current_time,
+                fundamental_data,
+                short_memory,
+                mid_trend,
+            )
+
+            report_content = await self._call_llm_with_retry(
+                prompt,
+                enable_grounded_search=enable_grounded_search,
+            )
+            if not report_content:
+                raise ValueError("LLM生成报告失败（3次重试后仍不满足完整性校验）")
+
+            full_report = f"""🐉 **Gemini A股单股深度研报** | {standard_symbol} | {current_time}
+
+---
+
+{report_content}
+
+---
+
+📊 **数据窗口**：短期{lookback_days_short}天 | 多周期30/90/180天
+🔔 **触发类型**：{trigger_type}
+🧠 **AI模型**：{self.us_model}"""
+
+            title = f"[A股单股深度研报] {standard_symbol} ({current_time})"
+            alert_sent = await FeishuAlert.send_alert(title, full_report)
+            if alert_sent:
+                logger.info(f"[Gemini/AMarketSingleStock] report sent to Feishu successfully: {standard_symbol}")
+            else:
+                logger.error(f"[Gemini/AMarketSingleStock] report generated but Feishu send failed: {standard_symbol}")
+
+            return {
+                "ok": True,
+                "symbol": standard_symbol,
+                "title": title,
+                "report": full_report,
+                "error": None,
+            }
+        except Exception as e:
+            logger.error(f"[Gemini/AMarketSingleStock] failed for {symbol_input}: {e}", exc_info=True)
+            error_title = f"[A股单股研报错误] {symbol_input} ({current_time})"
             error_content = f"❌ 分析失败：{str(e)}"
             await FeishuAlert.send_alert(error_title, error_content)
             return {"ok": False, "symbol": symbol_input, "title": None, "report": None, "error": str(e)}
@@ -818,7 +1046,7 @@ class LLMAnalyst:
                 reason="error"
             )
 
-    async def generate_futu_hk_report(self, threshold: float = None, trigger_type: str = 'CRON'):
+    async def generate_futu_hk_report(self, threshold: Optional[float] = None, trigger_type: str = 'CRON'):
         """
         Generate HK market report specifically for Futu data using Kimi.
         This is the dedicated method for Futu HK stock analysis.
@@ -833,10 +1061,12 @@ class LLMAnalyst:
         today_date = datetime.now().strftime("%Y-%m-%d")
         
         # Get threshold from config
+        config = getattr(Settings, 'FUTU_SYMBOLS_CONFIG', {})
         if threshold is None:
             default_threshold = getattr(Settings, 'PRICE_CHANGE_THRESHOLD', 5.0)
-            config = getattr(Settings, 'FUTU_SYMBOLS_CONFIG', {})
             threshold = float(config.get('thresholds', {}).get('price_change', default_threshold))
+        else:
+            threshold = float(threshold)
         
         try:
             logger.info(f"[Gemini/Futu] Generating HK report for stocks exceeding {threshold}% threshold and special symbols...")
@@ -918,7 +1148,7 @@ class LLMAnalyst:
                     
                 # Process EMA derivatives
                 try:
-                    if klines_df is not None and not klines_df.empty:
+                    if isinstance(klines_df, pd.DataFrame) and not klines_df.empty:
                         from src.analysis.futu_math_indicator import calculate_ema_derivatives
                         ema_data = calculate_ema_derivatives(klines_df, price)
                         ema_tag = ema_data.get('tag_combined', ema_data['tag'])
@@ -942,6 +1172,7 @@ class LLMAnalyst:
             stock_details = await asyncio.gather(*tasks)
             
             stocks_text = "\n".join(stock_details)
+            output_rules = self._get_stocks_prompt_output_rules("hk_market_report")
             
             # Build prompt for Gemini
             prompt = f"""你是一个顶级的量化分析师。以下是触发监控阈值的异动香港股票列表及【底层资金流向数据】与【量化技术面数据】：
@@ -957,13 +1188,7 @@ class LLMAnalyst:
 【异动标的详情】
 {stocks_text}
 
-请严格按照以下结构和字数要求，生成一份专业的市场快报：
-1. **市场综述**（80-100字）：基于涨跌分布判断市场整体情绪。
-2. **板块热点**（80-100字）：识别是否有机器人、物流、航天、能源、半导体等板块的集中异动。
-3. **重点个股深度剖析**（200-350字）：必须将【内部量化系统研判】（代表真实的资金博弈，如主力洗盘、机构出逃）与【量化技术面】（基于多周期EMA均线与乖离率的数学引擎结果，如V型反转预备、长短共振等）结合分析。深度点评主力和散户的博弈状态，刺穿涨跌幅的表象。若出现左侧极端信号（如极度超跌）或右侧共振信号，需重点提示其背后的均值回归或顺势加速逻辑。
-4. **具体交易策略**（100-150字）：拒绝宏观套话（如“谨慎乐观”、“重个股轻指数”），必须**直接点名上述异动标的**给出具体的实操建议。明确指出哪些标的（结合资金数据与技术面信号）可顺势跟多或左侧抄底，哪些标的（如机构出逃或估值透支）存在诱多风险需坚决规避或逢高做空，哪些建议观望。要求观点鲜明、一针见血。
-
-语言要求：专业、简洁、有港股特色，使用 Markdown 格式，字数350-450字。"""
+{output_rules}"""
 
             # Use US Client (Gemini) instead of HK Client (Kimi)
             if not self.us_client:
@@ -980,7 +1205,7 @@ class LLMAnalyst:
                         messages=[
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=4000,
+                        max_tokens=5000,
                         temperature=1.0, # Increased temperature to avoid repetitive generation loop
                         stream=True,
                         timeout=90.0
