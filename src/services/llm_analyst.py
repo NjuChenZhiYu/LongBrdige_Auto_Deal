@@ -176,6 +176,7 @@ class LLMAnalyst:
     - 主营构成（产品/行业/地区/业务）：{fundamental_data.get('revenue_breakdown_profile', '无数据')}
     - 每股净资产(BPS)：{fundamental_data.get('net_asset_per_share', '无数据')}
     - PB：{fundamental_data.get('pb_ratio', '无数据')}
+    - 股息率(TTM)：{fundamental_data.get('dividend_ratio_ttm', '无数据')}
     
     【资金流与流动性】
     - 资金方向（当日实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
@@ -1150,7 +1151,11 @@ class LLMAnalyst:
                 try:
                     if isinstance(klines_df, pd.DataFrame) and not klines_df.empty:
                         from src.analysis.futu_math_indicator import calculate_ema_derivatives
-                        ema_data = calculate_ema_derivatives(klines_df, price)
+                        ema_data = calculate_ema_derivatives(
+                            klines_df,
+                            price,
+                            current_change_rate=change,
+                        )
                         ema_tag = ema_data.get('tag_combined', ema_data['tag'])
                         v5, v20, a5, bias20 = ema_data['v5'], ema_data.get('v20', 0.0), ema_data['a5'], ema_data.get('bias20', 0.0)
                         ema_text = f"   - 【量化技术面】：{ema_tag} (V5: {v5}%, V20: {v20}%, A5: {a5}%, Bias20: {bias20}%)"

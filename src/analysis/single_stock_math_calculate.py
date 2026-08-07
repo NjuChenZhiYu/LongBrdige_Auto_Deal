@@ -97,6 +97,7 @@ def calculate_bollinger_bands(
     current_price: float,
     window: int = 20,
     num_std: float = 2.0,
+    current_date: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Calculate Bollinger Band levels and current price position with realtime price included."""
     default = {
@@ -110,7 +111,7 @@ def calculate_bollinger_bands(
     if df is None or df.empty or "close" not in df.columns or len(df) < window:
         return default
 
-    close = pd.Series(pd.to_numeric(df["close"], errors="coerce"), dtype="float64").dropna()
+    close = _prepare_realtime_close_series(df, current_price, current_date=current_date)
     if len(close) < window:
         return default
 
@@ -118,11 +119,7 @@ def calculate_bollinger_bands(
     if current_price_num <= 0:
         current_price_num = float(close.iloc[-1])
 
-    close_calc = pd.concat(
-        [close.reset_index(drop=True), pd.Series([current_price_num], dtype="float64")],
-        ignore_index=True,
-    )
-    close_values = close_calc.to_numpy(dtype=float)
+    close_values = close.to_numpy(dtype=float)
     latest_window = close_values[-window:]
     mid = float(np.mean(latest_window))
     std = float(np.std(latest_window, ddof=0))
@@ -159,11 +156,95 @@ def calculate_bollinger_bands(
     }
 
 
+def _prepare_realtime_close_series(
+    df: pd.DataFrame,
+    current_price: float,
+    current_date: Optional[Any] = None,
+) -> pd.Series:
+    """Return close history with exactly one sample for the current trading day."""
+    close = pd.Series(pd.to_numeric(df["close"], errors="coerce"), dtype="float64")
+    valid_mask = close.notna()
+    close = close.loc[valid_mask].reset_index(drop=True)
+    if close.empty:
+        return close
+
+    current_price_num = _safe_float(current_price, 0.0)
+    if current_price_num <= 0:
+        current_price_num = float(close.iloc[-1])
+
+    date_col = "time_key" if "time_key" in df.columns else ("date" if "date" in df.columns else None)
+    replace_latest = False
+    if date_col is not None:
+        valid_dates = pd.to_datetime(df.loc[valid_mask, date_col], errors="coerce").dropna()
+        target_date = pd.to_datetime(
+            current_date if current_date is not None else datetime.now().date(),
+            errors="coerce",
+        )
+        if not valid_dates.empty and not pd.isna(target_date):
+            replace_latest = valid_dates.iloc[-1].date() == target_date.date()
+
+    if replace_latest:
+        close.iloc[-1] = current_price_num
+        return close
+
+    return pd.concat(
+        [close, pd.Series([current_price_num], dtype="float64")],
+        ignore_index=True,
+    )
+
+
+def _combine_price_action_tag(
+    tag_combined: str,
+    current_change_rate: Optional[float],
+    volume_regime: str,
+    v20: float,
+    v5: float,
+    a5: float,
+) -> str:
+    """Override the display tag when daily price action conflicts with EMA direction."""
+    change_rate_num = pd.to_numeric(pd.Series([current_change_rate]), errors="coerce").iloc[0]
+    if pd.isna(change_rate_num):
+        return tag_combined
+
+    change_rate = float(change_rate_num)
+    volume_suffix = f"+【{volume_regime}】" if volume_regime in ("放量", "缩量") else ""
+    if change_rate < 0 and v20 > 0 and v5 > 0:
+        phase = "当日转弱/动能降速" if a5 < 0 else "当日回撤/趋势未破"
+        return (
+            f"【上升趋势回调：{phase}】{volume_suffix}⚠️ "
+            "当日价格下跌但 EMA 趋势尚未完全转空；若主力同步流出，不按洗筹处理 "
+            "→ 等待止跌或资金回流确认"
+        )
+    if change_rate > 0 and v20 < 0 and v5 < 0:
+        phase = "当日反弹/跌势放缓" if a5 > 0 else "当日反弹/空头结构未改"
+        return (
+            f"【下跌趋势反弹：{phase}】{volume_suffix}⚠️ "
+            "当日价格上涨但 EMA 趋势尚未转多 → 等待 V5/V20 或资金进一步确认"
+        )
+    if change_rate < 0 and v20 < 0 and v5 > 0:
+        phase = "当日回落/修复动能转弱" if a5 < 0 else "当日回落/短期修复尚存"
+        return (
+            f"【短期修复受阻：{phase}】{volume_suffix}⚠️ "
+            "短期 EMA 虽已回升，但当日价格下跌且中期趋势仍弱 "
+            "→ 等待价格止跌及 V20 转正确认"
+        )
+    if change_rate > 0 and v20 > 0 and v5 < 0:
+        phase = "当日回升/下行动能缓和" if a5 > 0 else "当日反弹/短期结构仍弱"
+        return (
+            f"【短期转弱中的反弹：{phase}】{volume_suffix}⚠️ "
+            "当日价格上涨但短期 EMA 尚未恢复，中期上行结构仍在 "
+            "→ 等待 V5 重新转正确认"
+        )
+    return tag_combined
+
+
 def calculate_ema_derivatives(
     df: pd.DataFrame,
     current_price: float,
     current_volume: Optional[float] = None,
     current_turnover: Optional[float] = None,
+    current_change_rate: Optional[float] = None,
+    current_date: Optional[Any] = None,
 ) -> dict:
     """计算均线衍生指标、当日技术标签及成交量 regime。
 
@@ -173,7 +254,7 @@ def calculate_ema_derivatives(
 
     Returns:
         tag            : 价格趋势形态标签（6 种，不受成交量影响）
-        tag_combined   : tag + volume_regime 二次研判（§3.3）；中性量能时等于 tag
+        tag_combined   : tag + 当日涨跌 + volume_regime 的唯一展示标签
         v5 / v20 / a5  : EMA 一阶/二阶导数（%）
         bias20         : 乖离率，仅观测，不参与标签决策
         volume_regime  : 放量 / 中性 / 缩量（双确认或短/中期极端阈值，见文档 §2.5.3）
@@ -184,7 +265,7 @@ def calculate_ema_derivatives(
         "tag": "数据不足",
         "tag_combined": "数据不足",
         "v5": 0.0, "v20": 0.0, "a5": 0.0, "bias20": 0.0,
-        **calculate_bollinger_bands(df, current_price),
+        **calculate_bollinger_bands(df, current_price, current_date=current_date),
         "volume_regime": "中性",
         "volume_ratio_target_ema5": 1.0,
         "volume_ratio_target_ema20": 1.0,
@@ -294,8 +375,8 @@ def calculate_ema_derivatives(
                 )
 
     # --- EMA 衍生指标（含当日实时价格）---
-    df_calc = df.copy()
-    df_calc.loc[len(df_calc)] = {"close": current_price}
+    close_calc = _prepare_realtime_close_series(df, current_price, current_date=current_date)
+    df_calc = pd.DataFrame({"close": close_calc})
 
     df_calc["EMA5"] = df_calc["close"].ewm(span=5, adjust=False).mean()
     df_calc["EMA20"] = df_calc["close"].ewm(span=20, adjust=False).mean()
@@ -303,7 +384,7 @@ def calculate_ema_derivatives(
     df_calc["V20"] = df_calc["EMA20"].pct_change() * 100
     df_calc["A5"] = df_calc["V5"].diff()
     df_calc["Bias20"] = (df_calc["close"] - df_calc["EMA20"]) / df_calc["EMA20"] * 100
-    bollinger = calculate_bollinger_bands(df, current_price)
+    bollinger = calculate_bollinger_bands(df, current_price, current_date=current_date)
 
     latest = df_calc.iloc[-1]
     v5 = latest["V5"]
@@ -345,6 +426,17 @@ def calculate_ema_derivatives(
         tag_combined = _TV_MAP.get((tag, volume_regime), f"{tag}+【{volume_regime}】")
     else:
         tag_combined = tag
+
+    # 当日涨跌描述当前 K 线，EMA 导数描述原有趋势。只有二者方向冲突时才改写展示标签，
+    # 避免把单日回调误报成完整下跌趋势，也避免用“洗筹/低吸”掩盖当日明显走弱。
+    tag_combined = _combine_price_action_tag(
+        tag_combined=tag_combined,
+        current_change_rate=current_change_rate,
+        volume_regime=volume_regime,
+        v20=v20,
+        v5=v5,
+        a5=a5,
+    )
 
     def _sf(x: float) -> float:
         return round(x, 2) if not pd.isna(x) else 0.0

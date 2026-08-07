@@ -104,7 +104,11 @@ async def _fetch_stock_detail(stock: Stock, index: int, semaphore: asyncio.Semap
 
         try:
             if klines_df is not None and not klines_df.empty:
-                ema_data = calculate_ema_derivatives(klines_df, price)
+                ema_data = calculate_ema_derivatives(
+                    klines_df,
+                    price,
+                    current_change_rate=change,
+                )
                 ema_tag = ema_data.get("tag_combined", ema_data["tag"])
                 v5 = ema_data["v5"]
                 v20 = ema_data.get("v20", 0.0)

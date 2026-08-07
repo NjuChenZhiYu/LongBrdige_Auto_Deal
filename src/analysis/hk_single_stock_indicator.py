@@ -99,6 +99,7 @@ def build_short_term_memory(
         current_price,
         current_volume=current_volume,
         current_turnover=current_turnover,
+        current_change_rate=stock_snapshot.get("change_rate"),
     )
     latest_tag = _ema_result.get("tag_combined", _ema_result.get("tag", "数据不足"))
 
@@ -462,6 +463,7 @@ def hk_basic_finance_data(
     # 富途 get_market_snapshot：pe_ratio=市盈率（静），pe_ttm_ratio=市盈率 TTM（见 docs/Futu-API-Doc-zh-Python.md）
     pe_ratio_raw = stock_snapshot.get("pe_ratio")
     pe_ttm_ratio_raw = stock_snapshot.get("pe_ttm_ratio")
+    dividend_ratio_ttm_raw = stock_snapshot.get("dividend_ratio_ttm")
     issued_shares_raw = stock_snapshot.get("issued_shares")
     outstanding_shares_raw = stock_snapshot.get("outstanding_shares")
 
@@ -475,6 +477,7 @@ def hk_basic_finance_data(
     pb_ratio = common_safe_float(pb_ratio_raw, 0.0)
     pe_ratio_static = common_safe_float(pe_ratio_raw, 0.0)
     pe_ttm_ratio = common_safe_float(pe_ttm_ratio_raw, 0.0)
+    dividend_ratio_ttm = common_safe_float(dividend_ratio_ttm_raw, 0.0)
     issued_shares = common_safe_float(issued_shares_raw, 0.0)
     outstanding_shares = common_safe_float(outstanding_shares_raw, 0.0)
     ps_ttm = common_safe_float(ps_ttm_raw, 0.0)
@@ -493,6 +496,7 @@ def hk_basic_finance_data(
         "pb_ratio": _fmt_ratio(pb_ratio, pb_ratio_raw),
         "pe_ttm": _fmt_ratio(pe_ttm_ratio, pe_ttm_ratio_raw),
         "pe_static": _fmt_ratio(pe_ratio_static, pe_ratio_raw),
+        "dividend_ratio_ttm": _fmt_percent(dividend_ratio_ttm, dividend_ratio_ttm_raw),
         "ps_ttm": _fmt_ratio(ps_ttm, ps_ttm_raw),
         "main_in_flow_5d": _fmt_amount(common_safe_float(flow_5d.get("main_in_flow_hkd"), 0.0), flow_5d.get("main_in_flow_hkd")),
         "total_in_flow_5d": _fmt_amount(common_safe_float(flow_5d.get("total_in_flow_hkd"), 0.0), flow_5d.get("total_in_flow_hkd")),
