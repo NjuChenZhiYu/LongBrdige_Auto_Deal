@@ -35,6 +35,10 @@ from src.analysis.hk_single_stock_indicator import (
     calculate_hk_capital_flow_profiles,
     hk_basic_finance_data,
 )
+from src.analysis.hk_market_liquidity import (
+    build_hk_market_liquidity_profile,
+    format_hk_market_liquidity_prompt,
+)
 from src.analysis.us_single_stock_indicator import (
     _aggregate_us_capital_flow_from_df,
     build_us_fundamental_data,
@@ -48,7 +52,9 @@ __all__ = [
     # HK
     "_aggregate_hk_capital_flow_from_df",
     "build_hk_fundamental_data",
+    "build_hk_market_liquidity_profile",
     "calculate_hk_capital_flow_profiles",
+    "format_hk_market_liquidity_prompt",
     "hk_basic_finance_data",
     # US
     "_aggregate_us_capital_flow_from_df",

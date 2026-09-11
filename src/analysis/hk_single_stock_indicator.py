@@ -464,6 +464,7 @@ def hk_basic_finance_data(
     pe_ratio_raw = stock_snapshot.get("pe_ratio")
     pe_ttm_ratio_raw = stock_snapshot.get("pe_ttm_ratio")
     dividend_ratio_ttm_raw = stock_snapshot.get("dividend_ratio_ttm")
+    dividend_lfy_ratio_raw = stock_snapshot.get("dividend_lfy_ratio")
     issued_shares_raw = stock_snapshot.get("issued_shares")
     outstanding_shares_raw = stock_snapshot.get("outstanding_shares")
 
@@ -478,6 +479,7 @@ def hk_basic_finance_data(
     pe_ratio_static = common_safe_float(pe_ratio_raw, 0.0)
     pe_ttm_ratio = common_safe_float(pe_ttm_ratio_raw, 0.0)
     dividend_ratio_ttm = common_safe_float(dividend_ratio_ttm_raw, 0.0)
+    dividend_lfy_ratio = common_safe_float(dividend_lfy_ratio_raw, 0.0)
     issued_shares = common_safe_float(issued_shares_raw, 0.0)
     outstanding_shares = common_safe_float(outstanding_shares_raw, 0.0)
     ps_ttm = common_safe_float(ps_ttm_raw, 0.0)
@@ -497,6 +499,7 @@ def hk_basic_finance_data(
         "pe_ttm": _fmt_ratio(pe_ttm_ratio, pe_ttm_ratio_raw),
         "pe_static": _fmt_ratio(pe_ratio_static, pe_ratio_raw),
         "dividend_ratio_ttm": _fmt_percent(dividend_ratio_ttm, dividend_ratio_ttm_raw),
+        "dividend_lfy_ratio": _fmt_percent(dividend_lfy_ratio, dividend_lfy_ratio_raw),
         "ps_ttm": _fmt_ratio(ps_ttm, ps_ttm_raw),
         "main_in_flow_5d": _fmt_amount(common_safe_float(flow_5d.get("main_in_flow_hkd"), 0.0), flow_5d.get("main_in_flow_hkd")),
         "total_in_flow_5d": _fmt_amount(common_safe_float(flow_5d.get("total_in_flow_hkd"), 0.0), flow_5d.get("total_in_flow_hkd")),

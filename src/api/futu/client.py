@@ -1,5 +1,6 @@
 
 import logging
+import threading
 import pandas as pd
 from futu import OpenQuoteContext, SysConfig
 from config.settings import Settings
@@ -27,6 +28,7 @@ def _parse_snapshot_date(value: Any) -> Optional[date]:
 class FutuClient:
     _instance = None
     _quote_ctx = None
+    _quote_ctx_lock = threading.RLock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -60,23 +62,46 @@ class FutuClient:
         return None
 
     def get_quote_context(self, host=None, port=None):
-        """Get or create OpenQuoteContext singleton"""
+        """Get or create the shared OpenQuoteContext in a thread-safe way."""
         if host is None:
             host = Settings.FUTU_HOST
         if port is None:
             port = Settings.FUTU_PORT
-            
-        if self._quote_ctx is None or not self._quote_ctx.status: # Check if connected
+
+        with self._quote_ctx_lock:
+            try:
+                context_is_active = self._quote_ctx is not None and bool(self._quote_ctx.status)
+            except Exception:
+                context_is_active = False
+
+            if context_is_active:
+                return self._quote_ctx
+
+            stale_context = self._quote_ctx
+            self._quote_ctx = None
+            if stale_context is not None:
+                try:
+                    stale_context.close()
+                except Exception as e:
+                    logger.warning(f"Failed to close stale Futu OpenQuoteContext: {e}")
+
+            new_context = None
             try:
                 logger.info(f"Initializing Futu OpenQuoteContext at {host}:{port}...")
                 # SysConfig.set_all_thread_daemon(True) # Optional: set daemon threads
-                self._quote_ctx = OpenQuoteContext(host=host, port=port)
-                self._quote_ctx.start() # Ensure it's started if needed, though init usually starts it
+                new_context = OpenQuoteContext(host=host, port=port)
+                new_context.start() # Ensure it's started if needed, though init usually starts it
+                self._quote_ctx = new_context
                 logger.info("Futu OpenQuoteContext initialized successfully")
             except Exception as e:
+                if new_context is not None:
+                    try:
+                        new_context.close()
+                    except Exception:
+                        logger.exception("Failed to clean up partially initialized Futu context")
                 logger.error(f"Failed to initialize Futu OpenQuoteContext: {e}")
                 raise
-        return self._quote_ctx
+            return self._quote_ctx
 
     def is_realtime_trading_session(self, stock_snapshot: Dict[str, Any]) -> bool:
         """
@@ -675,6 +700,64 @@ class FutuClient:
             logger.error(f"Error getting historical klines for {code}: {e}")
             return None
 
+    def get_index_market_snapshots(self, codes: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Get full index snapshots keyed by code, including turnover and breadth fields."""
+        if not codes:
+            return {}
+        if not self._quote_ctx:
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for index snapshots: {e}")
+                return {}
+        try:
+            ret, data = self._quote_ctx.get_market_snapshot(codes)
+            if ret != 0 or data is None or data.empty:
+                logger.warning(f"Failed to get index snapshots for {codes}: {data}")
+                return {}
+            return {
+                str(row.get("code", "")): row.to_dict()
+                for _, row in data.iterrows()
+                if str(row.get("code", ""))
+            }
+        except Exception as e:
+            logger.error(f"Error getting index snapshots for {codes}: {e}")
+            return {}
+
+    def get_hk_index_historical_klines(
+        self,
+        code: str,
+        num_days: int = 200,
+    ) -> Optional[pd.DataFrame]:
+        """Get unadjusted HK index daily K-lines for turnover baselines."""
+        from futu import AuType, KLType
+
+        if not self._quote_ctx:
+            try:
+                self.get_quote_context()
+            except Exception as e:
+                logger.error(f"Failed to init quote context for index K-lines {code}: {e}")
+                return None
+        try:
+            fetch_days = max(int(num_days), 1) * 2 + 30
+            start_date = (datetime.now() - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            ret, data, _ = self._quote_ctx.request_history_kline(
+                code,
+                start=start_date,
+                end=end_date,
+                ktype=KLType.K_DAY,
+                autype=AuType.NONE,
+                max_count=fetch_days,
+            )
+            if ret == 0 and data is not None and not data.empty:
+                return data
+            logger.warning(f"Failed to get index K-lines for {code}: {data}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting index K-lines for {code}: {e}")
+            return None
+
     def get_stock_basicinfo(self, market: str, security_type: str, code_list=None):
         """
         Get basic stock info including some financial fields.
@@ -764,9 +847,16 @@ class FutuClient:
             return "分析错误", 0, 0
 
     def close(self):
-        if self._quote_ctx:
-            logger.info("Closing Futu OpenQuoteContext...")
-            self._quote_ctx.close()
+        with self._quote_ctx_lock:
+            context = self._quote_ctx
             self._quote_ctx = None
+            if context is None:
+                return
+
+            logger.info("Closing Futu OpenQuoteContext...")
+            try:
+                context.close()
+            except Exception as e:
+                logger.warning(f"Failed to close Futu OpenQuoteContext cleanly: {e}")
 
 futu_client = FutuClient()

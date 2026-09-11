@@ -19,6 +19,7 @@ from src.api.futu.client import futu_client
 from src.api.longport.client import longport_client
 from src.analysis.futu_math_indicator import (
     build_hk_fundamental_data,
+    build_hk_market_liquidity_profile,
     build_mid_term_trend,
     build_short_term_memory,
 )
@@ -70,6 +71,7 @@ def generate_prompt_file(
         (5, 10, 90),
         klines_df,
     )
+    fundamental_data["market_liquidity_profile"] = build_hk_market_liquidity_profile()
     #print(f"[INFO] 机构持仓趋势: {fundamental_data.get('institutional_holding_profile', '无数据')}")
     #print(f"[INFO] 股东持仓变动: {fundamental_data.get('shareholder_holding_change_profile', '无数据')}")
     try:

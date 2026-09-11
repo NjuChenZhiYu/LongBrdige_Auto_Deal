@@ -157,6 +157,11 @@ class LLMAnalyst:
         except Exception:
             drawdown_10d_fmt = "无数据"
         trend_lines = self._format_multi_window_trend_lines(mid_trend)
+        from src.analysis.hk_market_liquidity import format_hk_market_liquidity_prompt
+
+        market_liquidity_text = format_hk_market_liquidity_prompt(
+            fundamental_data.get("market_liquidity_profile", {}) or {}
+        )
         output_rules = self._get_prompt_output_rules("hk_single_stock", prompt_template)
         return f"""你是港股量化深度分析师。请基于下面结构化数据生成单股研报。
     【报告时间】
@@ -177,6 +182,7 @@ class LLMAnalyst:
     - 每股净资产(BPS)：{fundamental_data.get('net_asset_per_share', '无数据')}
     - PB：{fundamental_data.get('pb_ratio', '无数据')}
     - 股息率(TTM)：{fundamental_data.get('dividend_ratio_ttm', '无数据')}
+    - 股息率(LFY)：{fundamental_data.get('dividend_lfy_ratio', '无数据')}
     
     【资金流与流动性】
     - 资金方向（当日实时）：主力大单净流入 {fundamental_data.get('main_in_flow_today', '无数据')}，整体净流入 {fundamental_data.get('total_in_flow_today', '无数据')}
@@ -186,6 +192,8 @@ class LLMAnalyst:
     - 换手率承接（相对20/60/180日，偏低/安全/偏高）：{fundamental_data.get('turnover_rate_liquidity_profile', '暂无结构化数据')}
     - 承接解释约束：成交额/换手率偏高不自动利多、偏低不自动利空，必须结合当日涨跌幅、价格所处低/中/高位、趋势筹码与是否高位滞涨或放量下跌判断。
     - 口径约束：成交额/换手率 15:00 前使用最近完整交易日，15:00 后且快照确认当日才使用当天累计值；短线放量/缩量与中期流动性不得重复计分。
+
+{market_liquidity_text}
 
     【长期持有人与筹码集中度】
     - 机构持仓趋势（最新报告期）：{fundamental_data.get('institutional_holding_profile', '无数据')}
@@ -625,6 +633,7 @@ class LLMAnalyst:
                 build_short_term_memory,
                 build_mid_term_trend,
                 build_hk_fundamental_data,
+                build_hk_market_liquidity_profile,
             )
             short_memory = build_short_term_memory(hk_klines_df, stock, capital_data, lookback_days_short)
             mid_trend = build_mid_term_trend(hk_klines_df, price, lookback_days_mid)
@@ -634,6 +643,9 @@ class LLMAnalyst:
                 stock,
                 (5, 10, 90),
                 hk_klines_df,
+            )
+            fundamental_data["market_liquidity_profile"] = await asyncio.to_thread(
+                build_hk_market_liquidity_profile
             )
             try:
                 fundamental_data["revenue_disclosure_profile"] = await longport_client.get_revenue_disclosure_profile(
